@@ -1,0 +1,38 @@
+[project]
+name = "landshark-group-backend"
+version = "0.1.0"
+description = "LandShark Group — Chain of Title Document Manager"
+requires-python = ">=3.12"
+
+dependencies = [
+    "Django>=5.1,<6.0",
+    "djangorestframework>=3.15,<4.0",
+    "djangorestframework-simplejwt[crypto]>=5.3,<6.0",
+    "django-cors-headers>=4.6,<5.0",
+    "django-filter>=24.3,<25.0",
+    "pymupdf>=1.25,<2.0",
+    "python-docx>=1.1,<2.0",
+    "anthropic>=0.40,<1.0",
+    "openai>=1.50,<2.0",
+    "google-generativeai>=0.8,<1.0",
+    "fpdf2>=2.8,<3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8,<1.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.setuptools.packages.find]
+include = ["config*", "apps*"]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"

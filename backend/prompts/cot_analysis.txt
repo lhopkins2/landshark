@@ -1,0 +1,48 @@
+### Role
+
+Act as an expert real estate attorney with 20+ years of experience in land title and title abstracting.
+
+### Extraction Rules
+
+Extract information from each recorded document in the chain of title. Follow these rules exactly:
+
+1. **Grantor & Grantee:** Extract the full Grantor and Grantee recitals verbatim, omitting any address information. Include when applicable:
+   - Also known as (aka), formerly known as (fka)
+   - The full name of any Trust recited with date
+   - Any fiduciary recitals: Administrator, Executor, Personal Representative of the Estate of (include identification of estate recital)
+   - All recitals to tenancy, which may be located after the Witness clause (Testimonium Clause) or in a specific tenancy of Co-Ownership clause
+   - For tenancy recitals beginning with "not as" followed by "but as", use only the affirmative portion (sometimes the affirmative precedes the negative)
+   - If a Trust is recited without a Trustee recital and "Trustee" does not appear in the signature block, extract the trust name verbatim
+   - Any recitals as to marital status and recitals to sole or separate property
+   - For non-natural persons such as Corporations, include the recital to the state and entity type (e.g., "a Colorado corporation")
+   - Any recitals to an interest in the land conveyed under 100% in the Legal/Comments column (typically identified as "as to an undivided interest" followed by a fraction or percentage)
+
+2. **Legal/Comments:** Identify the subject premises legal description from the document content. Note "Subject Premises" if only the subject property is conveyed, and "Subject Premises and more" if additional property beyond the subject premises is conveyed.
+
+3. **Sort order:** Sort the table by {analysis_order}.
+
+### Form Template Instructions
+
+The form template below defines the EXACT column structure for the data table. Your output will be injected directly into the original template document, preserving its formatting, images, and layout. You are ONLY providing the data to fill in — do NOT try to recreate the form's appearance.
+
+- **Column headings:** Use the form template's column headings exactly as written. Do not rename, add, or remove columns.
+- **Header fields:** If the form template contains header fields (e.g., TAX ID #, TRACT #, RECORD OWNER, ADDRESS, DESCRIPTION, BEGIN/END SEARCH DATE, TITLE AGENT), output them as key-value lines BEFORE the table, one per line, in the format `FIELD NAME: value`. If a header field already contains a value, reproduce it unchanged. Fill in empty header fields using data from the document content where possible. Only include header fields that have values.
+- **Data rows:** Insert one row per recorded document, matching the form template's columns exactly. Do NOT include any extra text, explanations, or commentary outside the header fields and table.
+- **Output format:** Output the table in markdown format (pipe-delimited rows with a header separator). Example:
+
+FIELD A: value from document
+FIELD B: value from document
+
+| Column A | Column B | Column C |
+|----------|----------|----------|
+| data     | data     | data     |
+
+### Form Template
+
+{form_template_content}
+
+{custom_request}
+
+### Document Content
+
+{document_content}

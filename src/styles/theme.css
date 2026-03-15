@@ -1,0 +1,115 @@
+/* =============================================================================
+   LandShark Design Tokens
+   Color scheme: Mud brown + Yellow with light/dark mode
+   ============================================================================= */
+
+:root {
+  /* Brand colors */
+  --ls-primary: #8B6914;
+  --ls-primary-dark: #6B5010;
+  --ls-primary-light: #A88320;
+  --ls-primary-hover: #7A5C12;
+  --ls-accent: #D4A017;
+  --ls-accent-dark: #B08614;
+  --ls-accent-light: #E8B830;
+  --ls-accent-hover: #C49515;
+
+  /* Light mode (default) */
+  --ls-bg: #FAF8F3;
+  --ls-bg-alt: #F2EDE3;
+  --ls-surface: #FFFFFF;
+  --ls-surface-hover: #F9F7F2;
+  --ls-surface-2: #F5F0E8;
+  --ls-border: #DDD5C4;
+  --ls-border-light: #EBE5D8;
+  --ls-text: #1A1A18;
+  --ls-text-secondary: #5C5A52;
+  --ls-text-muted: #8A8780;
+  --ls-text-on-primary: #FFFFFF;
+  --ls-text-on-accent: #1A1A18;
+
+  /* Semantic colors */
+  --ls-success: #2E7D32;
+  --ls-success-bg: #E8F5E9;
+  --ls-warning: #ED6C02;
+  --ls-warning-bg: #FFF3E0;
+  --ls-error: #D32F2F;
+  --ls-error-bg: #FFEBEE;
+  --ls-info: #0288D1;
+  --ls-info-bg: #E1F5FE;
+
+  /* Spacing scale */
+  --ls-space-xs: 4px;
+  --ls-space-sm: 8px;
+  --ls-space-md: 16px;
+  --ls-space-lg: 24px;
+  --ls-space-xl: 32px;
+  --ls-space-2xl: 48px;
+  --ls-space-3xl: 64px;
+
+  /* Border radius */
+  --ls-radius-sm: 4px;
+  --ls-radius-md: 8px;
+  --ls-radius-lg: 12px;
+  --ls-radius-xl: 16px;
+  --ls-radius-full: 9999px;
+
+  /* Shadows */
+  --ls-shadow-sm: 0 1px 2px rgba(26, 26, 24, 0.06);
+  --ls-shadow-md: 0 4px 12px rgba(26, 26, 24, 0.1);
+  --ls-shadow-lg: 0 8px 24px rgba(26, 26, 24, 0.12);
+  --ls-shadow-xl: 0 16px 48px rgba(26, 26, 24, 0.16);
+
+  /* Typography */
+  --ls-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --ls-font-mono: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+
+  /* Font sizes */
+  --ls-text-xs: 0.75rem;
+  --ls-text-sm: 0.875rem;
+  --ls-text-base: 1rem;
+  --ls-text-lg: 1.125rem;
+  --ls-text-xl: 1.25rem;
+  --ls-text-2xl: 1.5rem;
+  --ls-text-3xl: 1.875rem;
+
+  /* Sidebar */
+  --ls-sidebar-width: 260px;
+  --ls-sidebar-collapsed: 64px;
+
+  /* Transitions */
+  --ls-transition-fast: 150ms ease;
+  --ls-transition-base: 250ms ease;
+}
+
+/* =============================================================================
+   Dark Mode
+   ============================================================================= */
+[data-theme="dark"] {
+  --ls-bg: #131210;
+  --ls-bg-alt: #1A1916;
+  --ls-surface: #211F1A;
+  --ls-surface-hover: #2A2822;
+  --ls-surface-2: #302E28;
+  --ls-border: #3E3B33;
+  --ls-border-light: #33312B;
+  --ls-text: #EBE7DA;
+  --ls-text-secondary: #B5B0A3;
+  --ls-text-muted: #7D7970;
+  --ls-text-on-primary: #FFFFFF;
+  --ls-text-on-accent: #1A1A18;
+
+  --ls-success: #4CAF50;
+  --ls-success-bg: #1B2E1B;
+  --ls-warning: #FF9800;
+  --ls-warning-bg: #2E2415;
+  --ls-error: #EF5350;
+  --ls-error-bg: #2E1515;
+  --ls-info: #29B6F6;
+  --ls-info-bg: #152A2E;
+
+  --ls-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --ls-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --ls-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --ls-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.6);
+}

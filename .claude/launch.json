@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "/opt/homebrew/bin/node",
+      "runtimeArgs": ["node_modules/.bin/vite"],
+      "port": 5174
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "/Users/liamhopkins/Documents/Title Apps/landshark-group/backend/.venv/bin/python",
+      "runtimeArgs": ["manage.py", "runserver", "8001"],
+      "cwd": "backend",
+      "port": 8001
+    }
+  ]
+}
