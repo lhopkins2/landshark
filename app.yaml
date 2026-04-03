@@ -17,6 +17,9 @@ services:
       - path: /api
       - path: /admin
     envs:
+      - key: DISABLE_COLLECTSTATIC
+        value: "1"
+        scope: BUILD_TIME
       - key: DJANGO_SECRET_KEY
         type: SECRET
         scope: RUN_AND_BUILD_TIME
