@@ -1,6 +1,8 @@
 from datetime import timedelta
 from pathlib import Path
 
+import os
+
 import dj_database_url
 from decouple import Csv, config
 
@@ -78,15 +80,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
-_database_url = config("DATABASE_URL", default="")
-DATABASES = {
-    "default": dj_database_url.parse(
-        _database_url,
-        conn_max_age=600,
-    )
-    if _database_url
-    else {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
-}
+_database_url = os.environ.get("DATABASE_URL", "").strip()
+if _database_url:
+    DATABASES = {"default": dj_database_url.parse(_database_url, conn_max_age=600)}
+else:
+    DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}
 
 # ---------------------------------------------------------------------------
 # Auth
