@@ -2,6 +2,10 @@ import io
 import re
 from pathlib import Path
 
+# Vision pipeline constants
+IMAGE_DPI = 120
+MAX_PAGES_REDUCED = 120
+
 
 def extract_text_from_file(file_field):
     """Extract text content from a PDF, DOCX, or TXT file."""
@@ -32,9 +36,9 @@ def _extract_pdf_text(file_field):
     # First pass: try normal text extraction
     text_parts = []
     total_meaningful_chars = 0
-    for page in doc:
+    for i, page in enumerate(doc):
         text = page.get_text()
-        text_parts.append(text)
+        text_parts.append(f"--- Page {i + 1} ---\n{text}")
         # Count chars excluding whitespace, short lines, URLs, and page indicators
         for line in text.split("\n"):
             stripped = line.strip()
@@ -45,16 +49,43 @@ def _extract_pdf_text(file_field):
                 continue
             total_meaningful_chars += len(stripped)
 
-    # If normal extraction yields very little real content, use OCR
-    avg_chars_per_page = total_meaningful_chars / max(len(doc), 1)
-    if avg_chars_per_page < 300:
-        text_parts = []
-        for page in doc:
-            tp = page.get_textpage_ocr(flags=0, full=True, dpi=300)
-            text_parts.append(page.get_text("text", textpage=tp))
+    # Note: OCR fallback removed — vision-based analysis handles scanned PDFs
+    # directly via page images sent to the AI model.
 
     doc.close()
     return "\n".join(text_parts)
+
+
+def render_pdf_pages(file_field, dpi=IMAGE_DPI, max_pages=None):
+    """Render PDF pages as PNG images for vision-based analysis.
+
+    Returns a list of (page_number, png_bytes) tuples and the total page count.
+    page_number is 1-indexed.
+    """
+    import pymupdf
+
+    file_field.open("rb")
+    data = file_field.read()
+    file_field.close()
+
+    doc = pymupdf.open(stream=data, filetype="pdf")
+    total_pages = len(doc)
+    render_count = min(total_pages, max_pages) if max_pages else total_pages
+
+    pages = []
+    for i in range(render_count):
+        page = doc[i]
+        pixmap = page.get_pixmap(dpi=dpi)
+        png_bytes = pixmap.tobytes("png")
+        pages.append((i + 1, png_bytes))
+
+    doc.close()
+    return pages, total_pages
+
+
+def is_pdf(file_field):
+    """Check if a file is a PDF (eligible for vision-based analysis)."""
+    return file_field.name.lower().endswith(".pdf")
 
 
 def _extract_table_rows(table):

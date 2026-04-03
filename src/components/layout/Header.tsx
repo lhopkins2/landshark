@@ -1,10 +1,12 @@
-import { Sun, Moon, LogOut } from "lucide-react";
+import { Sun, Moon, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useThemeStore } from "../../stores/themeStore";
 import { useAuthStore } from "../../stores/authStore";
+import { useSidebarStore } from "../../stores/sidebarStore";
 
 export default function Header() {
   const { theme, toggleTheme } = useThemeStore();
   const { user, logout } = useAuthStore();
+  const { collapsed, toggleCollapsed } = useSidebarStore();
 
   return (
     <header
@@ -19,6 +21,25 @@ export default function Header() {
         gap: "var(--ls-space-md)",
       }}
     >
+      {/* Sidebar toggle */}
+      <button
+        onClick={toggleCollapsed}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 36,
+          height: 36,
+          borderRadius: "var(--ls-radius-md)",
+          color: "var(--ls-text-secondary)",
+          transition: "all var(--ls-transition-fast)",
+          marginRight: "auto",
+        }}
+      >
+        {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+      </button>
+
       {/* Theme toggle */}
       <button
         onClick={toggleTheme}

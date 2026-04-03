@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import COTAnalysis, FormTemplate, UserSettings
+from .models import COTAnalysis, FormTemplate, OrganizationSettings, UserSettings
 
 
 class FormTemplateSerializer(serializers.ModelSerializer):
@@ -15,6 +15,7 @@ class FormTemplateSerializer(serializers.ModelSerializer):
             "file_size",
             "mime_type",
             "description",
+            "custom_prompt",
             "uploaded_by",
             "uploaded_by_name",
             "created_at",
@@ -33,7 +34,7 @@ class FormTemplateUploadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FormTemplate
-        fields = ["file", "name", "description"]
+        fields = ["file", "name", "description", "custom_prompt"]
 
     def validate_file(self, value):
         allowed = [
@@ -93,6 +94,60 @@ class UserSettingsSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         # Only update keys that are non-empty (don't clear existing keys with blank submission)
+        for key_field in ["anthropic_api_key", "openai_api_key", "gemini_api_key"]:
+            value = validated_data.get(key_field)
+            if value is not None and value != "":
+                setattr(instance, key_field, value)
+            if key_field in validated_data and validated_data[key_field] == "":
+                validated_data.pop(key_field)
+        if "default_provider" in validated_data:
+            instance.default_provider = validated_data["default_provider"]
+        if "default_model" in validated_data:
+            instance.default_model = validated_data["default_model"]
+        instance.save()
+        return instance
+
+
+class OrganizationSettingsSerializer(serializers.ModelSerializer):
+    anthropic_api_key_display = serializers.SerializerMethodField()
+    openai_api_key_display = serializers.SerializerMethodField()
+    gemini_api_key_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrganizationSettings
+        fields = [
+            "id",
+            "default_provider",
+            "default_model",
+            "anthropic_api_key",
+            "openai_api_key",
+            "gemini_api_key",
+            "anthropic_api_key_display",
+            "openai_api_key_display",
+            "gemini_api_key_display",
+            "updated_at",
+        ]
+        extra_kwargs = {
+            "anthropic_api_key": {"write_only": True, "required": False},
+            "openai_api_key": {"write_only": True, "required": False},
+            "gemini_api_key": {"write_only": True, "required": False},
+        }
+
+    def _mask_key(self, key):
+        if not key:
+            return ""
+        return "\u2022" * 8 + key[-4:]
+
+    def get_anthropic_api_key_display(self, obj):
+        return self._mask_key(obj.anthropic_api_key)
+
+    def get_openai_api_key_display(self, obj):
+        return self._mask_key(obj.openai_api_key)
+
+    def get_gemini_api_key_display(self, obj):
+        return self._mask_key(obj.gemini_api_key)
+
+    def update(self, instance, validated_data):
         for key_field in ["anthropic_api_key", "openai_api_key", "gemini_api_key"]:
             value = validated_data.get(key_field)
             if value is not None and value != "":
@@ -170,7 +225,6 @@ class RunAnalysisSerializer(serializers.Serializer):
     """Input serializer for the analyze endpoint."""
 
     document_id = serializers.UUIDField()
-    form_template_id = serializers.UUIDField(required=False, allow_null=True, default=None)
     analysis_order = serializers.ChoiceField(
         choices=COTAnalysis.AnalysisOrder.choices,
         default="chronological",
@@ -179,6 +233,14 @@ class RunAnalysisSerializer(serializers.Serializer):
         choices=COTAnalysis.OutputFormat.choices,
         default="pdf",
     )
+    legal_description = serializers.CharField(required=False, allow_blank=True, default="")
     custom_request = serializers.CharField(required=False, allow_blank=True, default="")
     provider = serializers.CharField(required=False, allow_blank=True, default="")
     model = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class COTAnalysisDebugSerializer(COTAnalysisSerializer):
+    """Extended serializer with debug fields for developer users."""
+
+    class Meta(COTAnalysisSerializer.Meta):
+        fields = COTAnalysisSerializer.Meta.fields + ["prompt_text"]

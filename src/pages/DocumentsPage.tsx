@@ -1,8 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, type DragEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, FileText, Plus, Upload, Pencil, X, Download } from "lucide-react";
-import { documentsApi } from "../api/documents";
-import type { Document } from "../types/models";
+import { Search, FileText, Plus, Upload, Pencil, X, Download, FolderOpen, Folder, ChevronLeft, FolderPlus } from "lucide-react";
+import { documentsApi, foldersApi } from "../api/documents";
+import type { Document, DocumentFolder } from "../types/models";
 
 export default function DocumentsPage() {
   const [search, setSearch] = useState("");
@@ -10,10 +10,15 @@ export default function DocumentsPage() {
   const [showUploadForm, setShowUploadForm] = useState(false);
   const [editingDoc, setEditingDoc] = useState<Document | null>(null);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [showNewFolder, setShowNewFolder] = useState(false);
+  const [editingFolder, setEditingFolder] = useState<DocumentFolder | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const params: Record<string, string> = {};
   if (search) params.search = search;
+  if (currentFolderId) params.folder = currentFolderId;
 
   const { data, isLoading } = useQuery({
     queryKey: ["documents", params],
@@ -21,13 +26,34 @@ export default function DocumentsPage() {
     select: (res) => res.data,
   });
 
-  const documents = data?.results ?? [];
+  const { data: foldersData } = useQuery({
+    queryKey: ["document-folders"],
+    queryFn: () => foldersApi.list(),
+    select: (res) => res.data,
+  });
+
+  // When viewing "All Documents" (no folder), also fetch unfiled docs
+  const { data: unfiledData } = useQuery({
+    queryKey: ["documents", { folder__isnull: "true", ...(search ? { search } : {}) }],
+    queryFn: () => {
+      const p: Record<string, string> = { folder__isnull: "true" };
+      if (search) p.search = search;
+      return documentsApi.list(p);
+    },
+    select: (res) => res.data,
+    enabled: !currentFolderId,
+  });
+
+  const documents = currentFolderId ? (data?.results ?? []) : (unfiledData?.results ?? []);
+  const folders = foldersData?.results ?? [];
+  const currentFolder = currentFolderId ? folders.find((f) => f.id === currentFolderId) : null;
 
   const deleteMutation = useMutation({
     mutationFn: () => Promise.all([...selectedIds].map((id) => documentsApi.delete(id))),
     onSuccess: () => {
       setSelectedIds(new Set());
       queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["document-folders"] });
     },
   });
 
@@ -45,6 +71,41 @@ export default function DocumentsPage() {
     onSuccess: () => {
       setShowBulkEdit(false);
       setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+    },
+  });
+
+  const moveToFolderMutation = useMutation({
+    mutationFn: ({ docIds, folderId }: { docIds: string[]; folderId: string | null }) =>
+      documentsApi.moveToFolder(docIds, folderId),
+    onSuccess: () => {
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["document-folders"] });
+    },
+  });
+
+  const createFolderMutation = useMutation({
+    mutationFn: (name: string) => foldersApi.create({ name }),
+    onSuccess: () => {
+      setShowNewFolder(false);
+      queryClient.invalidateQueries({ queryKey: ["document-folders"] });
+    },
+  });
+
+  const renameFolderMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => foldersApi.update(id, { name }),
+    onSuccess: () => {
+      setEditingFolder(null);
+      queryClient.invalidateQueries({ queryKey: ["document-folders"] });
+    },
+  });
+
+  const deleteFolderMutation = useMutation({
+    mutationFn: (id: string) => foldersApi.delete(id),
+    onSuccess: () => {
+      if (currentFolderId) setCurrentFolderId(null);
+      queryClient.invalidateQueries({ queryKey: ["document-folders"] });
       queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
   });
@@ -83,6 +144,31 @@ export default function DocumentsPage() {
     }
   };
 
+  // Drag and drop handlers for moving docs into folders
+  const handleDragStart = (e: DragEvent, docId: string) => {
+    // If dragging a selected doc, drag all selected; otherwise just the one
+    const ids = selectedIds.has(docId) ? [...selectedIds] : [docId];
+    e.dataTransfer.setData("application/json", JSON.stringify(ids));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleFolderDrop = (e: DragEvent, folderId: string | null) => {
+    e.preventDefault();
+    setDragOverFolderId(null);
+    try {
+      const ids = JSON.parse(e.dataTransfer.getData("application/json")) as string[];
+      if (ids.length > 0) {
+        moveToFolderMutation.mutate({ docIds: ids, folderId });
+      }
+    } catch { /* ignore invalid data */ }
+  };
+
+  const handleFolderDragOver = (e: DragEvent, folderId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverFolderId(folderId);
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--ls-space-lg)" }}>
@@ -92,26 +178,116 @@ export default function DocumentsPage() {
             Upload and manage your documents
           </p>
         </div>
-        <button
-          onClick={() => setShowUploadForm(true)}
-          style={{
-            display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
-            padding: "10px 20px", borderRadius: "var(--ls-radius-md)",
-            backgroundColor: "var(--ls-primary)", color: "var(--ls-text-on-primary)",
-            fontWeight: 600, fontSize: "var(--ls-text-sm)", border: "none", cursor: "pointer",
-          }}
-        >
-          <Plus size={16} /> Upload Document
-        </button>
+        <div style={{ display: "flex", gap: "var(--ls-space-sm)" }}>
+          <button
+            onClick={() => setShowNewFolder(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
+              padding: "10px 16px", borderRadius: "var(--ls-radius-md)",
+              backgroundColor: "var(--ls-surface)", color: "var(--ls-text-secondary)",
+              fontWeight: 600, fontSize: "var(--ls-text-sm)", border: "1px solid var(--ls-border)", cursor: "pointer",
+            }}
+          >
+            <FolderPlus size={16} /> New Folder
+          </button>
+          <button
+            onClick={() => setShowUploadForm(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
+              padding: "10px 20px", borderRadius: "var(--ls-radius-md)",
+              backgroundColor: "var(--ls-primary)", color: "var(--ls-text-on-primary)",
+              fontWeight: 600, fontSize: "var(--ls-text-sm)", border: "none", cursor: "pointer",
+            }}
+          >
+            <Plus size={16} /> Upload Document
+          </button>
+        </div>
       </div>
+
+      {/* New Folder Inline Form */}
+      {showNewFolder && (
+        <NewFolderForm
+          isPending={createFolderMutation.isPending}
+          onSave={(name) => createFolderMutation.mutate(name)}
+          onClose={() => setShowNewFolder(false)}
+        />
+      )}
 
       {showUploadForm && (
         <UploadForm
+          folders={folders}
+          currentFolderId={currentFolderId}
           onClose={() => setShowUploadForm(false)}
           onUploaded={() => {
             setShowUploadForm(false);
             queryClient.invalidateQueries({ queryKey: ["documents"] });
+            queryClient.invalidateQueries({ queryKey: ["document-folders"] });
           }}
+        />
+      )}
+
+      {/* Folder breadcrumb / navigation */}
+      {currentFolderId && currentFolder && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
+          marginBottom: "var(--ls-space-md)", fontSize: "var(--ls-text-sm)",
+        }}>
+          <button
+            onClick={() => { setCurrentFolderId(null); setSelectedIds(new Set()); }}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              background: "none", border: "none", cursor: "pointer",
+              color: "var(--ls-primary)", fontWeight: 600, padding: 0,
+            }}
+          >
+            <ChevronLeft size={16} /> All Documents
+          </button>
+          <span style={{ color: "var(--ls-text-muted)" }}>/</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 600 }}>
+            <FolderOpen size={16} style={{ color: "var(--ls-primary)" }} />
+            {currentFolder.name}
+          </span>
+          <span style={{ color: "var(--ls-text-muted)", marginLeft: "var(--ls-space-xs)" }}>
+            ({currentFolder.document_count} file{currentFolder.document_count !== 1 ? "s" : ""})
+          </span>
+          <button
+            onClick={() => setEditingFolder(currentFolder)}
+            title="Rename folder"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 28, height: 28, borderRadius: "var(--ls-radius-md)",
+              border: "1px solid var(--ls-border)", backgroundColor: "transparent",
+              color: "var(--ls-text-muted)", cursor: "pointer", marginLeft: 4,
+            }}
+          >
+            <Pencil size={12} />
+          </button>
+          <button
+            onClick={() => {
+              if (confirm(`Delete folder "${currentFolder.name}"? Documents inside will be moved out, not deleted.`)) {
+                deleteFolderMutation.mutate(currentFolder.id);
+              }
+            }}
+            title="Delete folder"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 28, height: 28, borderRadius: "var(--ls-radius-md)",
+              border: "1px solid rgba(239,68,68,0.3)", backgroundColor: "transparent",
+              color: "#ef4444", cursor: "pointer",
+            }}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {/* Rename Folder Modal */}
+      {editingFolder && (
+        <RenameFolderModal
+          folder={editingFolder}
+          isPending={renameFolderMutation.isPending}
+          onSave={(name) => renameFolderMutation.mutate({ id: editingFolder.id, name })}
+          onClose={() => setEditingFolder(null)}
         />
       )}
 
@@ -147,7 +323,7 @@ export default function DocumentsPage() {
           display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
           marginBottom: "var(--ls-space-md)", padding: "var(--ls-space-sm) var(--ls-space-md)",
           backgroundColor: "var(--ls-surface)", border: "1px solid var(--ls-border)",
-          borderRadius: "var(--ls-radius-md)",
+          borderRadius: "var(--ls-radius-md)", flexWrap: "wrap",
         }}>
           <span style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500 }}>
             {selectedIds.size} selected
@@ -177,6 +353,12 @@ export default function DocumentsPage() {
           >
             <Download size={13} /> {isExporting ? "Exporting..." : "Export Selected"}
           </button>
+          {/* Move to folder dropdown */}
+          <MoveToFolderButton
+            folders={folders}
+            currentFolderId={currentFolderId}
+            onMove={(folderId) => moveToFolderMutation.mutate({ docIds: [...selectedIds], folderId })}
+          />
           <button
             onClick={() => deleteMutation.mutate()}
             disabled={deleteMutation.isPending}
@@ -236,19 +418,71 @@ export default function DocumentsPage() {
         />
       )}
 
+      {/* Folder grid (only at root level) */}
+      {!currentFolderId && folders.length > 0 && !search && (
+        <div style={{ marginBottom: "var(--ls-space-lg)" }}>
+          <div style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--ls-space-sm)" }}>
+            Folders
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "var(--ls-space-sm)" }}>
+            {folders.map((folder) => (
+              <div
+                key={folder.id}
+                onClick={() => { setCurrentFolderId(folder.id); setSelectedIds(new Set()); }}
+                onDrop={(e) => handleFolderDrop(e, folder.id)}
+                onDragOver={(e) => handleFolderDragOver(e, folder.id)}
+                onDragLeave={() => setDragOverFolderId(null)}
+                style={{
+                  display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
+                  padding: "var(--ls-space-md)",
+                  backgroundColor: dragOverFolderId === folder.id ? "rgba(139,105,20,0.08)" : "var(--ls-surface)",
+                  border: dragOverFolderId === folder.id ? "2px solid var(--ls-primary)" : "1px solid var(--ls-border)",
+                  borderRadius: "var(--ls-radius-lg)",
+                  cursor: "pointer",
+                  transition: "border-color 0.15s, background-color 0.15s",
+                }}
+              >
+                <Folder size={20} style={{ color: "var(--ls-primary)", flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: "var(--ls-text-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {folder.name}
+                  </div>
+                  <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
+                    {folder.document_count} file{folder.document_count !== 1 ? "s" : ""}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Unfiled documents label */}
+      {!currentFolderId && folders.length > 0 && !search && (
+        <div
+          onDrop={(e) => handleFolderDrop(e, null)}
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+          style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--ls-space-sm)" }}
+        >
+          {documents.length > 0 ? "Unfiled Documents" : ""}
+        </div>
+      )}
+
       {/* Document list */}
       {isLoading ? (
         <p style={{ color: "var(--ls-text-muted)" }}>Loading...</p>
-      ) : documents.length === 0 ? (
+      ) : documents.length === 0 && (!folders.length || currentFolderId || search) ? (
         <div style={{
           textAlign: "center", padding: "var(--ls-space-2xl)",
           backgroundColor: "var(--ls-surface)", border: "1px solid var(--ls-border)",
           borderRadius: "var(--ls-radius-lg)", color: "var(--ls-text-muted)",
         }}>
           <FileText size={48} style={{ margin: "0 auto var(--ls-space-md)", opacity: 0.3 }} />
-          <p style={{ fontSize: "var(--ls-text-lg)" }}>No documents found</p>
+          <p style={{ fontSize: "var(--ls-text-lg)" }}>
+            {currentFolderId ? "This folder is empty" : "No documents found"}
+          </p>
           <p style={{ fontSize: "var(--ls-text-sm)", marginTop: "var(--ls-space-xs)" }}>
-            Upload your first document to get started.
+            {currentFolderId ? "Upload or drag documents into this folder." : "Upload your first document to get started."}
           </p>
         </div>
       ) : (
@@ -261,6 +495,7 @@ export default function DocumentsPage() {
               onToggle={() => toggleSelect(doc.id)}
               onEdit={() => setEditingDoc(doc)}
               onDownload={() => handleDownload(doc)}
+              onDragStart={(e) => handleDragStart(e, doc.id)}
             />
           ))}
         </div>
@@ -269,11 +504,150 @@ export default function DocumentsPage() {
   );
 }
 
-function UploadForm({ onClose, onUploaded }: { onClose: () => void; onUploaded: () => void }) {
+/* ---- Sub-components ---- */
+
+function NewFolderForm({ isPending, onSave, onClose }: { isPending: boolean; onSave: (name: string) => void; onClose: () => void }) {
+  const [name, setName] = useState("");
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
+      marginBottom: "var(--ls-space-md)", padding: "var(--ls-space-sm) var(--ls-space-md)",
+      backgroundColor: "var(--ls-surface)", border: "1px solid var(--ls-border)",
+      borderRadius: "var(--ls-radius-md)",
+    }}>
+      <FolderPlus size={16} style={{ color: "var(--ls-primary)", flexShrink: 0 }} />
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onSave(name.trim()); if (e.key === "Escape") onClose(); }}
+        placeholder="Folder name..."
+        style={{
+          flex: 1, padding: "6px 10px", borderRadius: "var(--ls-radius-md)",
+          border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+          fontSize: "var(--ls-text-sm)", outline: "none",
+        }}
+      />
+      <button
+        onClick={() => { if (name.trim()) onSave(name.trim()); }}
+        disabled={!name.trim() || isPending}
+        style={{
+          padding: "6px 14px", borderRadius: "var(--ls-radius-md)",
+          backgroundColor: name.trim() ? "var(--ls-primary)" : "var(--ls-border)",
+          color: name.trim() ? "#fff" : "var(--ls-text-muted)",
+          fontSize: "var(--ls-text-xs)", fontWeight: 600, border: "none",
+          cursor: name.trim() ? "pointer" : "not-allowed",
+        }}
+      >
+        {isPending ? "Creating..." : "Create"}
+      </button>
+      <button
+        onClick={onClose}
+        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ls-text-muted)", padding: 4 }}
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+}
+
+function RenameFolderModal({ folder, isPending, onSave, onClose }: { folder: DocumentFolder; isPending: boolean; onSave: (name: string) => void; onClose: () => void }) {
+  const [name, setName] = useState(folder.name);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ backgroundColor: "var(--ls-surface)", borderRadius: "var(--ls-radius-lg)", padding: "var(--ls-space-xl)", width: 380, maxWidth: "90vw", border: "1px solid var(--ls-border)" }}>
+        <h3 style={{ fontWeight: 700, fontSize: "var(--ls-text-lg)", marginBottom: "var(--ls-space-md)" }}>Rename Folder</h3>
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) onSave(name.trim()); }}
+          style={{ width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)", border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)", fontSize: "var(--ls-text-sm)", outline: "none" }}
+        />
+        <div style={{ display: "flex", gap: "var(--ls-space-sm)", marginTop: "var(--ls-space-lg)" }}>
+          <button onClick={() => { if (name.trim()) onSave(name.trim()); }} disabled={!name.trim() || isPending} style={{ padding: "8px 20px", borderRadius: "var(--ls-radius-md)", backgroundColor: "var(--ls-primary)", color: "#fff", fontWeight: 600, fontSize: "var(--ls-text-sm)", border: "none", cursor: "pointer" }}>
+            {isPending ? "Saving..." : "Save"}
+          </button>
+          <button onClick={onClose} style={{ padding: "8px 20px", borderRadius: "var(--ls-radius-md)", backgroundColor: "transparent", color: "var(--ls-text-secondary)", fontWeight: 500, fontSize: "var(--ls-text-sm)", border: "1px solid var(--ls-border)", cursor: "pointer" }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoveToFolderButton({ folders, currentFolderId, onMove }: { folders: DocumentFolder[]; currentFolderId: string | null; onMove: (folderId: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          display: "flex", alignItems: "center", gap: 4,
+          padding: "6px 14px", borderRadius: "var(--ls-radius-md)",
+          backgroundColor: "var(--ls-surface)", color: "var(--ls-text-secondary)",
+          fontSize: "var(--ls-text-xs)", fontWeight: 600,
+          border: "1px solid var(--ls-border)", cursor: "pointer",
+        }}
+      >
+        <Folder size={13} /> Move to Folder
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 100,
+          backgroundColor: "var(--ls-surface)", border: "1px solid var(--ls-border)",
+          borderRadius: "var(--ls-radius-md)", minWidth: 180, boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+          maxHeight: 240, overflowY: "auto",
+        }}>
+          {currentFolderId && (
+            <button
+              onClick={() => { onMove(null); setOpen(false); }}
+              style={{
+                display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
+                width: "100%", padding: "8px 12px", border: "none",
+                backgroundColor: "transparent", cursor: "pointer",
+                fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)",
+                textAlign: "left",
+              }}
+            >
+              <FileText size={14} /> Remove from folder
+            </button>
+          )}
+          {folders.filter((f) => f.id !== currentFolderId).map((folder) => (
+            <button
+              key={folder.id}
+              onClick={() => { onMove(folder.id); setOpen(false); }}
+              style={{
+                display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
+                width: "100%", padding: "8px 12px", border: "none",
+                backgroundColor: "transparent", cursor: "pointer",
+                fontSize: "var(--ls-text-sm)", color: "var(--ls-text)",
+                textAlign: "left",
+              }}
+            >
+              <Folder size={14} style={{ color: "var(--ls-primary)" }} /> {folder.name}
+            </button>
+          ))}
+          {folders.filter((f) => f.id !== currentFolderId).length === 0 && !currentFolderId && (
+            <div style={{ padding: "8px 12px", fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
+              No folders yet
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UploadForm({ folders, currentFolderId, onClose, onUploaded }: { folders: DocumentFolder[]; currentFolderId: string | null; onClose: () => void; onUploaded: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [tractNumber, setTractNumber] = useState("");
   const [lastRecordHolder, setLastRecordHolder] = useState("");
   const [description, setDescription] = useState("");
+  const [folderId, setFolderId] = useState<string>(currentFolderId || "");
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -285,6 +659,7 @@ function UploadForm({ onClose, onUploaded }: { onClose: () => void; onUploaded: 
       if (tractNumber) formData.append("tract_number", tractNumber);
       if (lastRecordHolder) formData.append("last_record_holder", lastRecordHolder);
       if (description) formData.append("description", description);
+      if (folderId) formData.append("folder", folderId);
       return documentsApi.upload(formData);
     },
     onSuccess: () => onUploaded(),
@@ -300,7 +675,6 @@ function UploadForm({ onClose, onUploaded }: { onClose: () => void; onUploaded: 
       <h3 style={{ fontWeight: 600, marginBottom: "var(--ls-space-md)" }}>Upload Document</h3>
       {error && <p style={{ color: "var(--ls-error)", fontSize: "var(--ls-text-sm)", marginBottom: "var(--ls-space-sm)" }}>{error}</p>}
 
-      {/* File drop zone */}
       <div
         onClick={() => fileInputRef.current?.click()}
         style={{
@@ -330,9 +704,26 @@ function UploadForm({ onClose, onUploaded }: { onClose: () => void; onUploaded: 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--ls-space-sm)" }}>
         <FormField label="Tract Number" value={tractNumber} onChange={setTractNumber} placeholder="e.g. 12345" />
         <FormField label="Last Record Holder" value={lastRecordHolder} onChange={setLastRecordHolder} placeholder="e.g. John Smith" />
-        <div style={{ gridColumn: "1 / -1" }}>
-          <FormField label="Description (optional)" value={description} onChange={setDescription} placeholder="Brief description..." />
+        <div>
+          <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
+            Folder <span style={{ fontWeight: 400, color: "var(--ls-text-muted)" }}>(optional)</span>
+          </label>
+          <select
+            value={folderId}
+            onChange={(e) => setFolderId(e.target.value)}
+            style={{
+              width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+              border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+              fontSize: "var(--ls-text-sm)", cursor: "pointer", color: "var(--ls-text)",
+            }}
+          >
+            <option value="">No folder</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </select>
         </div>
+        <FormField label="Description (optional)" value={description} onChange={setDescription} placeholder="Brief description..." />
       </div>
 
       <div style={{ display: "flex", gap: "var(--ls-space-sm)", marginTop: "var(--ls-space-md)" }}>
@@ -360,15 +751,21 @@ function UploadForm({ onClose, onUploaded }: { onClose: () => void; onUploaded: 
   );
 }
 
-function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload }: { document: Document; selected: boolean; onToggle: () => void; onEdit: () => void; onDownload: () => void }) {
+function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload, onDragStart }: {
+  document: Document; selected: boolean; onToggle: () => void; onEdit: () => void; onDownload: () => void;
+  onDragStart: (e: DragEvent<HTMLDivElement>) => void;
+}) {
   return (
     <div
+      draggable
+      onDragStart={onDragStart}
       style={{
         display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
         padding: "var(--ls-space-md) var(--ls-space-lg)",
         backgroundColor: "var(--ls-surface)",
         border: selected ? "1px solid var(--ls-primary)" : "1px solid var(--ls-border)",
         borderRadius: "var(--ls-radius-lg)",
+        cursor: "grab",
       }}
     >
       <input
@@ -401,6 +798,7 @@ function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload }:
             {formatFileSize(doc.file_size)}
             {doc.tract_number && <> &middot; Tract {doc.tract_number}</>}
             {doc.last_record_holder && <> &middot; {doc.last_record_holder}</>}
+            {doc.folder_name && <> &middot; <Folder size={12} style={{ verticalAlign: "middle", marginRight: 2 }} />{doc.folder_name}</>}
           </div>
         </div>
       </div>

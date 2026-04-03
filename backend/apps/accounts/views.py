@@ -5,7 +5,15 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from .serializers import LoginSerializer, UserSerializer
+from .models import Membership
+from .permissions import IsOrgAdmin
+from .serializers import (
+    CreateMemberSerializer,
+    LoginSerializer,
+    MemberSerializer,
+    UpdateMemberSerializer,
+    UserSerializer,
+)
 
 
 class LoginView(APIView):
@@ -46,3 +54,72 @@ class CurrentUserView(APIView):
 
     def get(self, request):
         return Response(UserSerializer(request.user).data)
+
+
+class OrgMemberListCreateView(APIView):
+    permission_classes = [IsAuthenticated, IsOrgAdmin]
+
+    def _get_org(self, user):
+        try:
+            return user.membership.organization
+        except Membership.DoesNotExist:
+            return None
+
+    def get(self, request):
+        org = self._get_org(request.user)
+        if not org:
+            return Response([], status=status.HTTP_200_OK)
+        members = Membership.objects.filter(organization=org).select_related("user").order_by("user__email")
+        return Response(MemberSerializer(members, many=True).data)
+
+    def post(self, request):
+        org = self._get_org(request.user)
+        if not org:
+            return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = CreateMemberSerializer(data=request.data, context={"organization": org})
+        serializer.is_valid(raise_exception=True)
+        membership = serializer.save()
+        return Response(MemberSerializer(membership).data, status=status.HTTP_201_CREATED)
+
+
+class OrgMemberDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsOrgAdmin]
+
+    def _get_membership(self, request, pk):
+        """Get a membership by user ID, scoped to the requesting user's org."""
+        try:
+            requesting_org = request.user.membership.organization
+        except Membership.DoesNotExist:
+            return None
+        try:
+            return Membership.objects.select_related("user").get(user_id=pk, organization=requesting_org)
+        except Membership.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        membership = self._get_membership(request, pk)
+        if not membership:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(MemberSerializer(membership).data)
+
+    def patch(self, request, pk):
+        membership = self._get_membership(request, pk)
+        if not membership:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        # Prevent admins from demoting themselves
+        if membership.user == request.user and request.data.get("role") == "operator":
+            return Response({"detail": "You cannot change your own role."}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = UpdateMemberSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.update(membership, serializer.validated_data)
+        return Response(MemberSerializer(membership).data)
+
+    def delete(self, request, pk):
+        membership = self._get_membership(request, pk)
+        if not membership:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        if membership.user == request.user:
+            return Response({"detail": "You cannot deactivate yourself."}, status=status.HTTP_400_BAD_REQUEST)
+        membership.user.is_active = False
+        membership.user.save(update_fields=["is_active"])
+        return Response(status=status.HTTP_204_NO_CONTENT)

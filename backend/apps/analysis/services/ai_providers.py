@@ -1,8 +1,13 @@
+import base64
 from pathlib import Path
 
 from django.conf import settings as django_settings
 
 PROMPT_FILE = Path(django_settings.BASE_DIR) / "prompts" / "cot_analysis.txt"
+
+# Document content marker in the prompt template — everything after this
+# is injected programmatically as image or text content blocks.
+_DOCUMENT_SECTION = "## DOCUMENT CONTENT"
 
 
 def load_prompt_template():
@@ -10,8 +15,25 @@ def load_prompt_template():
     return PROMPT_FILE.read_text(encoding="utf-8")
 
 
-def build_prompt(document_content, form_template_content, analysis_order, custom_request=""):
-    """Build the full prompt from template + content."""
+
+def build_prompt_content(
+    page_images,
+    document_text,
+    analysis_order,
+    custom_request="",
+    legal_description="",
+    total_pages=0,
+):
+    """Build structured content blocks for the LLM.
+
+    Returns a list of content blocks in a provider-agnostic intermediate format:
+        {"type": "text", "text": "..."}
+        {"type": "image", "data": b"...", "media_type": "image/png"}
+
+    page_images: list of (page_number, png_bytes) tuples from render_pdf_pages()
+    document_text: extracted text string (used as fallback/supplement or primary for non-PDFs)
+    total_pages: total page count of the original document (for truncation messaging)
+    """
     template = load_prompt_template()
     order_label = (
         "chronological order (oldest to newest)"
@@ -19,22 +41,72 @@ def build_prompt(document_content, form_template_content, analysis_order, custom
         else "reverse chronological order (newest to oldest)"
     )
 
-    custom_request_section = ""
-    if custom_request.strip():
-        custom_request_section = (
-            "### Custom Request\n\n"
-            "You MUST fulfill the following custom request in addition to all other instructions. "
-            "This takes priority over default behavior where there is a conflict:\n\n"
-            f"{custom_request.strip()}"
-        )
+    # Split template at the document content section
+    if _DOCUMENT_SECTION in template:
+        preamble = template[: template.index(_DOCUMENT_SECTION)].rstrip()
+    else:
+        preamble = template
 
-    return template.format(
+    # Substitute template variables in the preamble
+    preamble = preamble.format(
         analysis_order=order_label,
-        document_content=document_content,
-        form_template_content=form_template_content,
-        custom_request=custom_request_section,
+        legal_description=legal_description.strip() if legal_description else "(No legal description provided.)",
+        custom_request=custom_request.strip() if custom_request else "(No custom request provided.)",
     )
 
+    content = []
+
+    if page_images:
+        # Vision mode: prompt preamble + page images
+        content.append({"type": "text", "text": preamble})
+        content.append({
+            "type": "text",
+            "text": (
+                f"## DOCUMENT CONTENT\n\n"
+                f"The following {len(page_images)} page(s) are images of the document. "
+                f"Examine each page carefully for all visual details including stamps, "
+                f"handwriting, margin annotations, struck text, and other markings."
+            ),
+        })
+
+        for page_num, png_bytes in page_images:
+            content.append({"type": "text", "text": f"--- Page {page_num} of {total_pages} ---"})
+            content.append({"type": "image", "data": png_bytes, "media_type": "image/png"})
+
+        # If the document was truncated, include remaining pages as text
+        rendered_count = len(page_images)
+        if rendered_count < total_pages and document_text:
+            content.append({
+                "type": "text",
+                "text": (
+                    f"## SUPPLEMENTARY TEXT (Pages {rendered_count + 1}–{total_pages})\n\n"
+                    f"The remaining pages could not be sent as images due to context limits. "
+                    f"Their extracted text is provided below:\n\n{document_text}"
+                ),
+            })
+    else:
+        # Text-only mode: inject document text directly into the prompt
+        full_prompt = preamble + f"\n\n---\n\n## DOCUMENT CONTENT\n\n{document_text}"
+        content.append({"type": "text", "text": full_prompt})
+
+    return content
+
+
+def build_prompt(document_content, analysis_order, custom_request="", legal_description=""):
+    """Build a text-only prompt string (backward-compatible wrapper)."""
+    blocks = build_prompt_content(
+        page_images=[],
+        document_text=document_content,
+        analysis_order=analysis_order,
+        custom_request=custom_request,
+        legal_description=legal_description,
+    )
+    return blocks[0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# Provider API calls
+# ---------------------------------------------------------------------------
 
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-20250514",
@@ -42,40 +114,113 @@ DEFAULT_MODELS = {
     "gemini": "gemini-2.5-flash",
 }
 
+DEFAULT_MAX_TOKENS = 8192
+LARGE_DOC_MAX_TOKENS = 16384
+LARGE_DOC_PAGE_THRESHOLD = 30
+AI_CALL_TIMEOUT = 480  # 8 minutes — fail fast instead of hanging indefinitely
 
-def call_anthropic(prompt, api_key, model=""):
-    """Call Anthropic Claude API."""
+
+def _max_tokens_for_content(content):
+    """Scale max_tokens based on whether the request includes many images."""
+    if isinstance(content, list):
+        image_count = sum(1 for b in content if b.get("type") == "image")
+        if image_count >= LARGE_DOC_PAGE_THRESHOLD:
+            return LARGE_DOC_MAX_TOKENS
+    return DEFAULT_MAX_TOKENS
+
+
+def _format_anthropic(content_blocks):
+    """Convert intermediate content blocks to Anthropic message format."""
+    parts = []
+    for block in content_blocks:
+        if block["type"] == "text":
+            parts.append({"type": "text", "text": block["text"]})
+        elif block["type"] == "image":
+            b64 = base64.b64encode(block["data"]).decode("utf-8")
+            parts.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": block["media_type"],
+                    "data": b64,
+                },
+            })
+    return parts
+
+
+def _format_openai(content_blocks):
+    """Convert intermediate content blocks to OpenAI message format."""
+    parts = []
+    for block in content_blocks:
+        if block["type"] == "text":
+            parts.append({"type": "text", "text": block["text"]})
+        elif block["type"] == "image":
+            b64 = base64.b64encode(block["data"]).decode("utf-8")
+            data_url = f"data:{block['media_type']};base64,{b64}"
+            parts.append({
+                "type": "image_url",
+                "image_url": {"url": data_url, "detail": "high"},
+            })
+    return parts
+
+
+def _format_gemini(content_blocks):
+    """Convert intermediate content blocks to Gemini parts list."""
+    parts = []
+    for block in content_blocks:
+        if block["type"] == "text":
+            parts.append(block["text"])
+        elif block["type"] == "image":
+            parts.append({"mime_type": block["media_type"], "data": block["data"]})
+    return parts
+
+
+def _normalize_content(content):
+    """Ensure content is a list of blocks (supports legacy string input)."""
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return content
+
+
+def call_anthropic(content, api_key, model=""):
+    """Call Anthropic Claude API with text or vision content."""
     import anthropic
 
-    client = anthropic.Anthropic(api_key=api_key)
+    blocks = _normalize_content(content)
+    client = anthropic.Anthropic(api_key=api_key, timeout=AI_CALL_TIMEOUT)
     message = client.messages.create(
         model=model or DEFAULT_MODELS["anthropic"],
-        max_tokens=8192,
-        messages=[{"role": "user", "content": prompt}],
+        max_tokens=_max_tokens_for_content(blocks),
+        messages=[{"role": "user", "content": _format_anthropic(blocks)}],
     )
     return message.content[0].text
 
 
-def call_openai(prompt, api_key, model=""):
-    """Call OpenAI GPT API."""
+def call_openai(content, api_key, model=""):
+    """Call OpenAI GPT API with text or vision content."""
     import openai
 
-    client = openai.OpenAI(api_key=api_key)
+    blocks = _normalize_content(content)
+    client = openai.OpenAI(api_key=api_key, timeout=AI_CALL_TIMEOUT)
     response = client.chat.completions.create(
         model=model or DEFAULT_MODELS["openai"],
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=8192,
+        messages=[{"role": "user", "content": _format_openai(blocks)}],
+        max_tokens=_max_tokens_for_content(blocks),
     )
     return response.choices[0].message.content
 
 
-def call_gemini(prompt, api_key, model=""):
-    """Call Google Gemini API."""
+def call_gemini(content, api_key, model=""):
+    """Call Google Gemini API with text or vision content."""
     import google.generativeai as genai
 
+    blocks = _normalize_content(content)
     genai.configure(api_key=api_key)
     genai_model = genai.GenerativeModel(model or DEFAULT_MODELS["gemini"])
-    response = genai_model.generate_content(prompt)
+    response = genai_model.generate_content(
+        _format_gemini(blocks),
+        request_options={"timeout": AI_CALL_TIMEOUT},
+    )
     return response.text
 
 
@@ -86,13 +231,17 @@ PROVIDER_FUNCTIONS = {
 }
 
 
-def run_analysis(prompt, provider, api_key, model=""):
+def run_analysis(content, provider, api_key, model=""):
     """Dispatch to the correct AI provider."""
     func = PROVIDER_FUNCTIONS.get(provider)
     if not func:
         raise ValueError(f"Unknown provider: {provider}")
-    return func(prompt, api_key, model)
+    return func(content, api_key, model)
 
+
+# ---------------------------------------------------------------------------
+# Model listing (unchanged)
+# ---------------------------------------------------------------------------
 
 def list_anthropic_models(api_key):
     """List available Anthropic models."""
@@ -127,10 +276,8 @@ OPENAI_DISPLAY_NAMES = {
 
 def _openai_display_name(model_id):
     """Get a friendly display name for an OpenAI model ID."""
-    # Exact match first
     if model_id in OPENAI_DISPLAY_NAMES:
         return OPENAI_DISPLAY_NAMES[model_id]
-    # Try matching the base model (strip date suffixes like -2025-04-14)
     base = model_id
     for suffix_start in ("-2024", "-2025", "-2026"):
         idx = base.find(suffix_start)

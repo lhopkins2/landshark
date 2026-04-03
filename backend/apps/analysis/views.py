@@ -1,27 +1,80 @@
-import os
-import threading
-
-from django.conf import settings as django_settings
 from django.core.files.base import ContentFile
-from django.db import connections
+from django_q.tasks import async_task
 from rest_framework import status, viewsets
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.permissions import HasApiKeyAccess, IsOrgAdmin
 from apps.documents.models import Document
 
-from .models import COTAnalysis, FormTemplate, UserSettings
+from .models import COTAnalysis, FormTemplate, OrganizationSettings, UserSettings
 from .serializers import (
+    COTAnalysisDebugSerializer,
     COTAnalysisSerializer,
     FormTemplateSerializer,
     FormTemplateUploadSerializer,
+    OrganizationSettingsSerializer,
     RunAnalysisSerializer,
     UserSettingsSerializer,
 )
-from .services.ai_providers import build_prompt, list_models, run_analysis
-from .services.document_generator import generate_document, generate_from_docx_template
-from .services.document_parser import extract_text_from_file
+from .services.ai_providers import list_models
+
+
+def resolve_api_config(user):
+    """Resolve API keys and defaults for a user.
+
+    Returns (provider, model, api_key_map) with fallback:
+    1. If user has API key access and personal keys configured, use those.
+    2. Otherwise, fall back to organization-level settings.
+    """
+    from apps.accounts.models import Membership
+
+    # Check if user has personal settings with keys
+    try:
+        user_settings = UserSettings.objects.get(user=user)
+    except UserSettings.DoesNotExist:
+        user_settings = None
+
+    # Determine if user has API key access
+    has_access = getattr(user, "is_developer", False)
+    if not has_access:
+        membership = getattr(user, "membership", None)
+        if membership:
+            has_access = membership.role == "admin" or membership.has_api_key_access
+
+    # If user has access and personal keys, use them
+    if has_access and user_settings:
+        key_map = {
+            "anthropic": user_settings.anthropic_api_key,
+            "openai": user_settings.openai_api_key,
+            "gemini": user_settings.gemini_api_key,
+        }
+        if any(key_map.values()):
+            return user_settings.default_provider, user_settings.default_model, key_map
+
+    # Fall back to org settings
+    try:
+        membership = user.membership
+        org_settings = OrganizationSettings.objects.get(organization=membership.organization)
+        key_map = {
+            "anthropic": org_settings.anthropic_api_key,
+            "openai": org_settings.openai_api_key,
+            "gemini": org_settings.gemini_api_key,
+        }
+        return org_settings.default_provider, org_settings.default_model, key_map
+    except (Membership.DoesNotExist, OrganizationSettings.DoesNotExist):
+        pass
+
+    # No keys available at all
+    if user_settings:
+        return user_settings.default_provider, user_settings.default_model, {
+            "anthropic": user_settings.anthropic_api_key,
+            "openai": user_settings.openai_api_key,
+            "gemini": user_settings.gemini_api_key,
+        }
+    return "anthropic", "", {"anthropic": "", "openai": "", "gemini": ""}
 
 
 class FormTemplateViewSet(viewsets.ModelViewSet):
@@ -66,11 +119,47 @@ class UserSettingsView(APIView):
         return Response(UserSettingsSerializer(settings_obj).data)
 
     def put(self, request):
+        self.check_permissions(request)
         settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
         serializer = UserSettingsSerializer(settings_obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(UserSettingsSerializer(settings_obj).data)
+
+    def get_permissions(self):
+        if self.request.method == "PUT":
+            return [IsAuthenticated(), HasApiKeyAccess()]
+        return [IsAuthenticated()]
+
+
+class OrgSettingsView(APIView):
+    """GET/PUT endpoint for organization-level analysis settings (admin only)."""
+
+    permission_classes = [IsAuthenticated, IsOrgAdmin]
+
+    def _get_org(self, user):
+        from apps.accounts.models import Membership
+        try:
+            return user.membership.organization
+        except Membership.DoesNotExist:
+            return None
+
+    def get(self, request):
+        org = self._get_org(request.user)
+        if not org:
+            return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+        return Response(OrganizationSettingsSerializer(settings_obj).data)
+
+    def put(self, request):
+        org = self._get_org(request.user)
+        if not org:
+            return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
+        settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
+        serializer = OrganizationSettingsSerializer(settings_obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(OrganizationSettingsSerializer(settings_obj).data)
 
 
 class COTAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
@@ -82,7 +171,7 @@ class COTAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return COTAnalysis.objects.filter(created_by=self.request.user).select_related(
-            "document", "form_template", "generated_document"
+            "document", "generated_document"
         )
 
 
@@ -94,16 +183,7 @@ class ListModelsView(APIView):
         if not provider:
             return Response({"detail": "provider query param required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            user_settings = UserSettings.objects.get(user=request.user)
-        except UserSettings.DoesNotExist:
-            return Response({"detail": "Please configure your API keys first."}, status=status.HTTP_400_BAD_REQUEST)
-
-        api_key_map = {
-            "anthropic": user_settings.anthropic_api_key,
-            "openai": user_settings.openai_api_key,
-            "gemini": user_settings.gemini_api_key,
-        }
+        _, _, api_key_map = resolve_api_config(request.user)
         api_key = api_key_map.get(provider, "")
         if not api_key:
             return Response(
@@ -130,30 +210,12 @@ class RunAnalysisView(APIView):
         except Document.DoesNotExist:
             return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        form_template_id = serializer.validated_data.get("form_template_id")
-        form_template = None
-        if form_template_id:
-            try:
-                form_template = FormTemplate.objects.get(id=form_template_id)
-            except FormTemplate.DoesNotExist:
-                return Response({"detail": "Form template not found."}, status=status.HTTP_404_NOT_FOUND)
+        # Resolve API config with user → org fallback
+        default_provider, default_model, api_key_map = resolve_api_config(request.user)
 
-        try:
-            user_settings = UserSettings.objects.get(user=request.user)
-        except UserSettings.DoesNotExist:
-            return Response(
-                {"detail": "Please configure your AI API keys in Settings first."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Allow per-request provider/model override, fall back to user defaults
-        provider = serializer.validated_data.get("provider") or user_settings.default_provider
-        model = serializer.validated_data.get("model") or user_settings.default_model
-        api_key_map = {
-            "anthropic": user_settings.anthropic_api_key,
-            "openai": user_settings.openai_api_key,
-            "gemini": user_settings.gemini_api_key,
-        }
+        # Allow per-request provider/model override, fall back to resolved defaults
+        provider = serializer.validated_data.get("provider") or default_provider
+        model = serializer.validated_data.get("model") or default_model
         api_key = api_key_map.get(provider, "")
 
         if not api_key:
@@ -164,10 +226,10 @@ class RunAnalysisView(APIView):
 
         output_format = serializer.validated_data.get("output_format", "pdf")
         custom_request = serializer.validated_data.get("custom_request", "")
+        legal_description = serializer.validated_data.get("legal_description", "")
 
         analysis = COTAnalysis.objects.create(
             document=document,
-            form_template=form_template,
             analysis_order=serializer.validated_data["analysis_order"],
             output_format=output_format,
             status=COTAnalysis.Status.PROCESSING,
@@ -177,134 +239,62 @@ class RunAnalysisView(APIView):
             created_by=request.user,
         )
 
-        # Spawn background thread with primitive args only
-        thread = threading.Thread(
-            target=RunAnalysisView._run_analysis_background,
-            args=(
-                str(analysis.id),
-                str(document.id),
-                str(form_template.id) if form_template else None,
-                serializer.validated_data["analysis_order"],
-                output_format,
-                provider,
-                api_key,
-                model,
-                str(request.user.id),
-                custom_request,
-            ),
-            daemon=True,
+        # Queue background task via Django-Q2
+        async_task(
+            "apps.analysis.tasks.run_analysis_task",
+            str(analysis.id),
+            str(document.id),
+            serializer.validated_data["analysis_order"],
+            output_format,
+            provider,
+            api_key,
+            model,
+            str(request.user.id),
+            custom_request,
+            legal_description,
+            task_name=f"analysis-{analysis.id}",
+            timeout=480,
         )
-        thread.start()
 
         return Response(
             COTAnalysisSerializer(analysis).data,
             status=status.HTTP_202_ACCEPTED,
         )
 
-    @staticmethod
-    def _run_analysis_background(
-        analysis_id, document_id, form_template_id,
-        analysis_order, output_format, provider, api_key, model, user_id,
-        custom_request="",
-    ):
-        """Run the full analysis pipeline in a background thread."""
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
+
+class CancelAnalysisView(APIView):
+    """POST endpoint to cancel an in-progress analysis."""
+
+    def post(self, request, pk):
+        try:
+            analysis = COTAnalysis.objects.get(id=pk, created_by=request.user)
+        except COTAnalysis.DoesNotExist:
+            return Response({"detail": "Analysis not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if analysis.status not in (COTAnalysis.Status.PENDING, COTAnalysis.Status.PROCESSING):
+            return Response(
+                {"detail": f"Cannot cancel analysis with status '{analysis.status}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        analysis.status = COTAnalysis.Status.CANCELLED
+        analysis.progress_step = COTAnalysis.ProgressStep.CANCELLED
+        analysis.error_message = "Cancelled by user."
+        analysis.save(update_fields=["status", "progress_step", "error_message", "updated_at"])
+
+        return Response(COTAnalysisSerializer(analysis).data)
+
+
+class AnalysisDebugView(APIView):
+    """GET endpoint for developer-only debug info on an analysis."""
+
+    def get(self, request, pk):
+        if not getattr(request.user, "is_developer", False):
+            return Response({"detail": "Developer access required."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            analysis = COTAnalysis.objects.get(id=analysis_id)
-            document = Document.objects.get(id=document_id)
-            form_template = FormTemplate.objects.get(id=form_template_id) if form_template_id else None
-            user = User.objects.get(id=user_id)
+            analysis = COTAnalysis.objects.select_related("document", "generated_document").get(id=pk)
+        except COTAnalysis.DoesNotExist:
+            return Response({"detail": "Analysis not found."}, status=status.HTTP_404_NOT_FOUND)
 
-            generic_form_instructions = (
-                "Present the results in a standard chain of title table format with these columns:\n"
-                "Entry # | Recording Date | Instrument Type | Instrument/Book-Page # | Grantor | Grantee | Notes"
-            )
-
-            # Step 1: Extract text
-            analysis.progress_step = COTAnalysis.ProgressStep.EXTRACTING_TEXT
-            analysis.save(update_fields=["progress_step", "updated_at"])
-
-            document_content = extract_text_from_file(document.file)
-            form_template_content = (
-                extract_text_from_file(form_template.file) if form_template else generic_form_instructions
-            )
-
-            # Step 2: Build prompt
-            analysis.progress_step = COTAnalysis.ProgressStep.BUILDING_PROMPT
-            analysis.save(update_fields=["progress_step", "updated_at"])
-
-            prompt = build_prompt(
-                document_content=document_content,
-                form_template_content=form_template_content,
-                analysis_order=analysis_order,
-                custom_request=custom_request,
-            )
-
-            # Step 3: Call AI (longest step)
-            analysis.progress_step = COTAnalysis.ProgressStep.CALLING_AI
-            analysis.save(update_fields=["progress_step", "updated_at"])
-
-            result = run_analysis(prompt, provider, api_key, model)
-            analysis.result_text = result
-
-            # Step 4: Generate document
-            analysis.progress_step = COTAnalysis.ProgressStep.GENERATING_DOCUMENT
-            analysis.save(update_fields=["progress_step", "updated_at"])
-
-            base_name = os.path.splitext(document.original_filename)[0]
-            doc_title = f"{base_name} - Analyzed"
-
-            # When a DOCX form template is provided, inject rows into the
-            # original template to preserve its exact formatting and images.
-            use_docx_template = (
-                form_template
-                and form_template.file.name.lower().endswith(".docx")
-            )
-
-            if use_docx_template:
-                ext = "docx"
-                mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                buf = generate_from_docx_template(form_template.file, result)
-            else:
-                ext = "docx" if output_format == "docx" else "pdf"
-                mime = (
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    if output_format == "docx"
-                    else "application/pdf"
-                )
-                buf = generate_document(result, output_format, title=doc_title)
-
-            generated_filename = f"{doc_title}.{ext}"
-            generated_doc = Document.objects.create(
-                original_filename=generated_filename,
-                file_size=buf.getbuffer().nbytes,
-                mime_type=mime,
-                tract_number=document.tract_number,
-                last_record_holder=document.last_record_holder,
-                description=f"Processed from {document.original_filename}",
-                uploaded_by=user,
-            )
-            generated_doc.file.save(generated_filename, ContentFile(buf.read()), save=True)
-
-            # Step 5: Complete
-            analysis.generated_document = generated_doc
-            analysis.status = COTAnalysis.Status.COMPLETED
-            analysis.progress_step = COTAnalysis.ProgressStep.COMPLETE
-            analysis.save()
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            try:
-                analysis = COTAnalysis.objects.get(id=analysis_id)
-                analysis.error_message = str(e)
-                analysis.status = COTAnalysis.Status.FAILED
-                analysis.progress_step = COTAnalysis.ProgressStep.FAILED
-                analysis.save()
-            except Exception:
-                pass
-
-        finally:
-            connections.close_all()
+        return Response(COTAnalysisDebugSerializer(analysis, context={"request": request}).data)

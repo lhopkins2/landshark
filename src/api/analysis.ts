@@ -3,6 +3,7 @@ import type {
   FormTemplate,
   UserAnalysisSettings,
   COTAnalysis,
+  COTAnalysisDebug,
   PaginatedResponse,
 } from "../types/models";
 
@@ -15,6 +16,8 @@ export const formTemplatesApi = {
     apiClient.post<FormTemplate>("/form-templates/", data, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
+  update: (id: string, data: Partial<Pick<FormTemplate, "name" | "description" | "custom_prompt">>) =>
+    apiClient.patch<FormTemplate>(`/form-templates/${id}/`, data),
   delete: (id: string) =>
     apiClient.delete(`/form-templates/${id}/`),
 };
@@ -44,12 +47,16 @@ export const analysesApi = {
     apiClient.get<COTAnalysis>(`/analyses/${id}/`),
   run: (data: {
     document_id: string;
-    form_template_id?: string | null;
     analysis_order: string;
     output_format?: string;
+    legal_description?: string;
     custom_request?: string;
     provider?: string;
     model?: string;
   }) =>
     apiClient.post<COTAnalysis>("/analysis/run/", data),
+  cancel: (id: string) =>
+    apiClient.post<COTAnalysis>(`/analysis/cancel/${id}/`),
+  debug: (id: string) =>
+    apiClient.get<COTAnalysisDebug>(`/analysis/debug/${id}/`),
 };

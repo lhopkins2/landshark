@@ -1,5 +1,16 @@
 import apiClient from "./client";
-import type { Document, PaginatedResponse } from "../types/models";
+import type { Document, DocumentFolder, PaginatedResponse } from "../types/models";
+
+export const foldersApi = {
+  list: () =>
+    apiClient.get<PaginatedResponse<DocumentFolder>>("/document-folders/"),
+  create: (data: { name: string; description?: string }) =>
+    apiClient.post<DocumentFolder>("/document-folders/", data),
+  update: (id: string, data: Partial<DocumentFolder>) =>
+    apiClient.patch<DocumentFolder>(`/document-folders/${id}/`, data),
+  delete: (id: string) =>
+    apiClient.delete(`/document-folders/${id}/`),
+};
 
 export const documentsApi = {
   list: (params?: Record<string, string>) =>
@@ -14,6 +25,12 @@ export const documentsApi = {
     apiClient.patch<Document>(`/documents/${id}/`, data),
   delete: (id: string) =>
     apiClient.delete(`/documents/${id}/`),
+  moveToFolder: (documentIds: string[], folderId: string | null) =>
+    apiClient.post("/documents/move-to-folder/", { document_ids: documentIds, folder_id: folderId }),
+  extractText: (id: string) =>
+    apiClient.get<{ text: string }>(`/documents/${id}/extract-text/`),
+  downloadBlob: (id: string) =>
+    apiClient.get(`/documents/${id}/download/`, { responseType: "blob" }),
   download: async (downloadUrl: string, filename: string) => {
     const response = await apiClient.get(downloadUrl, { responseType: "blob" });
     const url = window.URL.createObjectURL(response.data);

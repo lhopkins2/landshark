@@ -53,6 +53,7 @@ export const ANALYSIS_STATUSES = {
   processing: "Processing",
   completed: "Completed",
   failed: "Failed",
+  cancelled: "Cancelled",
 } as const;
 
 export const PROGRESS_STEPS = {
@@ -63,6 +64,7 @@ export const PROGRESS_STEPS = {
   generating_document: { label: "Generating Document", description: "Creating output file..." },
   complete: { label: "Complete", description: "Analysis finished!" },
   failed: { label: "Failed", description: "Something went wrong." },
+  cancelled: { label: "Cancelled", description: "Analysis was cancelled." },
 } as const;
 
 export const PROGRESS_STEP_ORDER = [

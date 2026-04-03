@@ -56,10 +56,22 @@ export interface ChainOfTitle {
 
 export type ChainStatus = "pending" | "in_progress" | "complete";
 
+export interface DocumentFolder {
+  id: string;
+  name: string;
+  description: string;
+  document_count: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Document {
   id: string;
   chain_of_title: string | null;
   chain_of_title_address?: string;
+  folder: string | null;
+  folder_name: string | null;
   file: string;
   original_filename: string;
   file_size: number;
@@ -88,6 +100,7 @@ export interface FormTemplate {
   file_size: number;
   mime_type: string;
   description: string;
+  custom_prompt: string;
   uploaded_by: string | null;
   uploaded_by_name: string | null;
   created_at: string;
@@ -106,7 +119,7 @@ export interface UserAnalysisSettings {
   updated_at: string;
 }
 
-export type AnalysisStatus = "pending" | "processing" | "completed" | "failed";
+export type AnalysisStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
 export type AnalysisOrder = "chronological" | "reverse_chronological";
 
 export type OutputFormat = "pdf" | "docx";
@@ -142,6 +155,8 @@ export interface COTAnalysis {
   updated_at: string;
 }
 
+export type UserRole = "admin" | "operator";
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -149,4 +164,24 @@ export interface AuthUser {
   last_name: string;
   phone: string;
   is_verified: boolean;
+  is_developer: boolean;
+  role: UserRole | null;
+  organization_id: string | null;
+  organization_name: string | null;
+  has_api_key_access: boolean;
+}
+
+export interface OrgMember {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  role: UserRole;
+  has_api_key_access: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface COTAnalysisDebug extends COTAnalysis {
+  prompt_text: string;
 }

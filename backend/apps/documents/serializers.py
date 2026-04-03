@@ -1,22 +1,43 @@
+import os
+
 from rest_framework import serializers
 
-from .models import Document
+from .models import Document, DocumentFolder
+
+
+class DocumentFolderSerializer(serializers.ModelSerializer):
+    document_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DocumentFolder
+        fields = ["id", "name", "description", "document_count", "created_by", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_by"]
+
+    def get_document_count(self, obj):
+        return obj.documents.count()
 
 
 class DocumentSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.SerializerMethodField()
     download_url = serializers.SerializerMethodField()
     chain_of_title_address = serializers.SerializerMethodField()
+    folder_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
         fields = [
-            "id", "chain_of_title", "original_filename", "file_size",
+            "id", "chain_of_title", "folder", "folder_name", "original_filename", "file_size",
             "mime_type", "tract_number", "last_record_holder", "description",
             "uploaded_by", "uploaded_by_name",
             "download_url", "chain_of_title_address", "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "uploaded_by", "file_size", "mime_type", "original_filename"]
+        read_only_fields = ["id", "uploaded_by", "file_size", "mime_type"]
+
+    def validate_original_filename(self, value):
+        value = os.path.basename(value).strip()
+        if not value:
+            raise serializers.ValidationError("Filename cannot be empty.")
+        return value
 
     def get_uploaded_by_name(self, obj):
         if obj.uploaded_by:
@@ -29,6 +50,9 @@ class DocumentSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(f"/api/documents/{obj.id}/download/")
         return None
 
+    def get_folder_name(self, obj):
+        return obj.folder.name if obj.folder else None
+
     def get_chain_of_title_address(self, obj):
         if obj.chain_of_title:
             return obj.chain_of_title.property_address
@@ -40,7 +64,7 @@ class DocumentUploadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Document
-        fields = ["file", "chain_of_title", "tract_number", "last_record_holder", "description"]
+        fields = ["file", "chain_of_title", "folder", "tract_number", "last_record_holder", "description"]
 
     def create(self, validated_data):
         uploaded_file = validated_data["file"]

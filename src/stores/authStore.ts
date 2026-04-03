@@ -36,3 +36,13 @@ export const useAuthStore = create<AuthState>()(
     { name: "landshark-group-auth" }
   )
 );
+
+// Role-based selectors
+export const selectIsAdmin = (s: AuthState) =>
+  s.user?.is_developer || s.user?.role === "admin";
+
+export const selectHasApiKeyAccess = (s: AuthState) =>
+  s.user?.is_developer || s.user?.role === "admin" || s.user?.has_api_key_access === true;
+
+export const selectCanManageUsers = (s: AuthState) =>
+  s.user?.is_developer || s.user?.role === "admin";

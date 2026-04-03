@@ -1,31 +1,33 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Link2, Upload, FileText, Search, Plus, Trash2, X, Pencil,
-  Play, Loader, AlertTriangle, ChevronDown, Clock, CheckCircle, XCircle, Download, Info,
+  Upload, FileText, Search, X, Pencil,
+  Play, Loader, AlertTriangle, ChevronDown, Clock, CheckCircle, XCircle, Download, Eye,
+  Folder, ChevronLeft, FolderOpen,
 } from "lucide-react";
-import { documentsApi } from "../api/documents";
-import { formTemplatesApi, analysesApi, analysisSettingsApi } from "../api/analysis";
-import { ANALYSIS_ORDERS, ANALYSIS_STATUSES, PROGRESS_STEPS, PROGRESS_STEP_ORDER } from "../utils/constants";
-import type { Document, FormTemplate, COTAnalysis, AnalysisOrder, OutputFormat } from "../types/models";
+import { useNavigate } from "react-router-dom";
+import { documentsApi, foldersApi } from "../api/documents";
+import { analysesApi, analysisSettingsApi } from "../api/analysis";
+import { ANALYSIS_ORDERS, ANALYSIS_STATUSES, PROGRESS_STEPS } from "../utils/constants";
+import type { Document, DocumentFolder, COTAnalysis, AnalysisOrder, OutputFormat } from "../types/models";
 
 export default function ChainOfTitlePage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Document selection
   const [docMode, setDocMode] = useState<"existing" | "upload">("existing");
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [docSearch, setDocSearch] = useState("");
+  const [browseFolderId, setBrowseFolderId] = useState<string | null>(null);
 
-  // Form template
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [showTemplateUpload, setShowTemplateUpload] = useState(false);
+  // Legal description
+  const [legalDescription, setLegalDescription] = useState("");
 
   // Analysis options
   const [analysisOrder, setAnalysisOrder] = useState<AnalysisOrder>("chronological");
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("pdf");
   const [customRequest, setCustomRequest] = useState("");
-  const [showPdfWarning, setShowPdfWarning] = useState(false);
 
   // Result
   const [currentResult, setCurrentResult] = useState<COTAnalysis | null>(null);
@@ -37,16 +39,11 @@ export default function ChainOfTitlePage() {
   // Queries
   const docParams: Record<string, string> = {};
   if (docSearch) docParams.search = docSearch;
+  if (browseFolderId) docParams.folder = browseFolderId;
 
   const { data: docsData } = useQuery({
     queryKey: ["documents", docParams],
     queryFn: () => documentsApi.list(Object.keys(docParams).length > 0 ? docParams : undefined),
-    select: (res) => res.data,
-  });
-
-  const { data: templatesData } = useQuery({
-    queryKey: ["form-templates"],
-    queryFn: () => formTemplatesApi.list(),
     select: (res) => res.data,
   });
 
@@ -61,11 +58,16 @@ export default function ChainOfTitlePage() {
     queryFn: () => analysisSettingsApi.get().then((r) => r.data),
   });
 
+  const { data: foldersData } = useQuery({
+    queryKey: ["document-folders"],
+    queryFn: () => foldersApi.list(),
+    select: (res) => res.data,
+  });
+
   const documents = docsData?.results ?? [];
-  const templates = templatesData?.results ?? [];
   const analyses = pastAnalyses?.results ?? [];
-  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) ?? null;
-  const selectedTemplateIsDocx = selectedTemplate?.original_filename?.toLowerCase().endsWith(".docx") ?? false;
+  const folders = foldersData?.results ?? [];
+  const currentBrowseFolder = browseFolderId ? folders.find((f) => f.id === browseFolderId) : null;
 
   // Check if the default provider has an API key configured
   const defaultProvider = settings?.default_provider || "anthropic";
@@ -81,11 +83,12 @@ export default function ChainOfTitlePage() {
   const [showUploadMeta, setShowUploadMeta] = useState(false);
   const uploadFileRef = useRef<HTMLInputElement>(null);
   const uploadDocMutation = useMutation({
-    mutationFn: (data: { file: File; tract_number: string; last_record_holder: string }) => {
+    mutationFn: (data: { file: File; tract_number: string; last_record_holder: string; folder_id?: string }) => {
       const fd = new FormData();
       fd.append("file", data.file);
       if (data.tract_number) fd.append("tract_number", data.tract_number);
       if (data.last_record_holder) fd.append("last_record_holder", data.last_record_holder);
+      if (data.folder_id) fd.append("folder", data.folder_id);
       return documentsApi.upload(fd);
     },
     onSuccess: (res) => {
@@ -94,6 +97,7 @@ export default function ChainOfTitlePage() {
       setUploadFile(null);
       setShowUploadMeta(false);
       queryClient.invalidateQueries({ queryKey: ["documents"] });
+      queryClient.invalidateQueries({ queryKey: ["document-folders"] });
     },
   });
 
@@ -114,9 +118,9 @@ export default function ChainOfTitlePage() {
       if (!selectedDocId) throw new Error("Select a document");
       return analysesApi.run({
         document_id: selectedDocId,
-        form_template_id: selectedTemplateId || null,
         analysis_order: analysisOrder,
         output_format: outputFormat,
+        legal_description: legalDescription || undefined,
         custom_request: customRequest || undefined,
       });
     },
@@ -134,6 +138,20 @@ export default function ChainOfTitlePage() {
     },
   });
 
+  // Cancel mutation
+  const cancelMutation = useMutation({
+    mutationFn: () => {
+      if (!pollingAnalysisId) throw new Error("No analysis to cancel");
+      return analysesApi.cancel(pollingAnalysisId);
+    },
+    onSuccess: (res) => {
+      setCurrentResult(res.data);
+      setPollingAnalysisId(null);
+      setElapsedSeconds(0);
+      queryClient.invalidateQueries({ queryKey: ["analyses"] });
+    },
+  });
+
   // Poll for analysis progress
   const { data: polledAnalysis, refetch: refetchProgress } = useQuery({
     queryKey: ["analysis-progress", pollingAnalysisId],
@@ -142,7 +160,7 @@ export default function ChainOfTitlePage() {
   });
 
   // Derived polling state
-  const pollingDone = polledAnalysis?.status === "completed" || polledAnalysis?.status === "failed";
+  const pollingDone = polledAnalysis?.status === "completed" || polledAnalysis?.status === "failed" || polledAnalysis?.status === "cancelled";
   const isAnalyzing = !!pollingAnalysisId && !pollingDone;
 
   // Manual polling — more robust than refetchInterval under React 19 Strict Mode
@@ -163,6 +181,20 @@ export default function ChainOfTitlePage() {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
     }
   }, [pollingDone, polledAnalysis, queryClient]);
+
+  // On first load, resume polling if an analysis is already in-progress
+  // (handles page refresh mid-analysis)
+  const hasResumedRef = useRef(false);
+  useEffect(() => {
+    if (hasResumedRef.current || pollingAnalysisId || !analyses.length) return;
+    const inProgress = analyses.find((a) => a.status === "processing" || a.status === "pending");
+    if (inProgress) {
+      hasResumedRef.current = true;
+      hasHandledCompletion.current = false;
+      setPollingAnalysisId(inProgress.id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyses]);
 
   // Elapsed timer
   useEffect(() => {
@@ -209,6 +241,29 @@ export default function ChainOfTitlePage() {
 
         {docMode === "existing" ? (
           <div>
+            {/* Folder breadcrumb */}
+            {browseFolderId && currentBrowseFolder && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
+                marginBottom: "var(--ls-space-sm)", fontSize: "var(--ls-text-xs)",
+              }}>
+                <button
+                  onClick={() => setBrowseFolderId(null)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 2,
+                    background: "none", border: "none", cursor: "pointer",
+                    color: "var(--ls-primary)", fontWeight: 600, padding: 0, fontSize: "var(--ls-text-xs)",
+                  }}
+                >
+                  <ChevronLeft size={14} /> All
+                </button>
+                <span style={{ color: "var(--ls-text-muted)" }}>/</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 2, fontWeight: 600 }}>
+                  <FolderOpen size={14} style={{ color: "var(--ls-primary)" }} />
+                  {currentBrowseFolder.name}
+                </span>
+              </div>
+            )}
             <div style={{ position: "relative", marginBottom: "var(--ls-space-sm)" }}>
               <Search size={16} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ls-text-muted)" }} />
               <input
@@ -223,10 +278,29 @@ export default function ChainOfTitlePage() {
                 }}
               />
             </div>
-            <div style={{ maxHeight: 240, overflowY: "auto", display: "grid", gap: "var(--ls-space-xs)" }}>
-              {documents.length === 0 ? (
+            <div style={{ maxHeight: 280, overflowY: "auto", display: "grid", gap: "var(--ls-space-xs)" }}>
+              {/* Folder tiles (only at root level, not while searching) */}
+              {!browseFolderId && !docSearch && folders.map((folder) => (
+                <div
+                  key={`folder-${folder.id}`}
+                  onClick={() => setBrowseFolderId(folder.id)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
+                    padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+                    border: "1px solid var(--ls-border)", cursor: "pointer",
+                    backgroundColor: "var(--ls-surface)",
+                  }}
+                >
+                  <Folder size={16} style={{ color: "var(--ls-primary)", flexShrink: 0 }} />
+                  <span style={{ fontSize: "var(--ls-text-sm)", fontWeight: 600, flex: 1 }}>{folder.name}</span>
+                  <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
+                    {folder.document_count} file{folder.document_count !== 1 ? "s" : ""}
+                  </span>
+                </div>
+              ))}
+              {documents.length === 0 && (browseFolderId || !folders.length || docSearch) ? (
                 <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)", padding: "var(--ls-space-md)", textAlign: "center" }}>
-                  No documents found
+                  {browseFolderId ? "This folder is empty" : "No documents found"}
                 </p>
               ) : documents.map((doc) => (
                 <DocSelectItem
@@ -278,7 +352,9 @@ export default function ChainOfTitlePage() {
             initialTract=""
             initialHolder=""
             isPending={uploadDocMutation.isPending}
-            onSave={(tract, holder) => uploadDocMutation.mutate({ file: uploadFile, tract_number: tract, last_record_holder: holder })}
+            folders={folders}
+            initialFolderId={browseFolderId || undefined}
+            onSave={(tract, holder, fId) => uploadDocMutation.mutate({ file: uploadFile, tract_number: tract, last_record_holder: holder, folder_id: fId })}
             onClose={() => { setShowUploadMeta(false); setUploadFile(null); }}
           />
         )}
@@ -310,79 +386,28 @@ export default function ChainOfTitlePage() {
         )}
       </SectionCard>
 
-      {/* Section 2: Form Template */}
-      <SectionCard title="2. Select Form Template">
-        {showTemplateUpload ? (
-          <TemplateUploadForm
-            onClose={() => setShowTemplateUpload(false)}
-            onUploaded={(id) => {
-              setSelectedTemplateId(id);
-              setShowTemplateUpload(false);
-              queryClient.invalidateQueries({ queryKey: ["form-templates"] });
+      {/* Section 2: Legal Description */}
+      <SectionCard title="2. Legal Description">
+        <div>
+          <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
+            Subject Premises Legal Description
+          </label>
+          <textarea
+            value={legalDescription}
+            onChange={(e) => setLegalDescription(e.target.value)}
+            placeholder="Enter the legal description of the Subject Premises (e.g., &quot;Lot 9, Block 6, HOMESTEAD MEADOWS UNIT 6, an Addition to the County of El Paso, according to the plat thereof on file in Book 55, Page 26, Plat Records, El Paso County, Texas&quot;)..."
+            rows={4}
+            style={{
+              width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+              border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+              fontSize: "var(--ls-text-sm)", color: "var(--ls-text)",
+              resize: "vertical", fontFamily: "inherit",
             }}
           />
-        ) : (
-          <div>
-            <div style={{ display: "flex", gap: "var(--ls-space-sm)", alignItems: "center", marginBottom: "var(--ls-space-sm)" }}>
-              <div style={{ position: "relative", flex: 1 }}>
-                <select
-                  value={selectedTemplateId ?? ""}
-                  onChange={(e) => setSelectedTemplateId(e.target.value || null)}
-                  style={{
-                    width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
-                    border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
-                    fontSize: "var(--ls-text-sm)", cursor: "pointer", appearance: "none",
-                    paddingRight: 32, color: "var(--ls-text)",
-                  }}
-                >
-                  <option value="">No Form (Generic Table)</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name} ({t.original_filename})</option>
-                  ))}
-                </select>
-                <ChevronDown size={16} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--ls-text-muted)" }} />
-              </div>
-              <button
-                onClick={() => setShowTemplateUpload(true)}
-                style={{
-                  display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
-                  padding: "8px 16px", borderRadius: "var(--ls-radius-md)",
-                  border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
-                  fontSize: "var(--ls-text-sm)", cursor: "pointer", color: "var(--ls-text)",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                <Plus size={14} /> Add Template
-              </button>
-            </div>
-
-            {templates.length === 0 && (
-              <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)", textAlign: "center", padding: "var(--ls-space-md)" }}>
-                No custom templates yet. The generic table format will be used, or upload a form template.
-              </p>
-            )}
-
-            {/* Template list for management */}
-            {templates.length > 0 && (
-              <div style={{ display: "grid", gap: "var(--ls-space-xs)", marginTop: "var(--ls-space-sm)" }}>
-                {templates.map((t) => (
-                  <TemplateItem
-                    key={t.id}
-                    template={t}
-                    selected={selectedTemplateId === t.id}
-                    onSelect={() => setSelectedTemplateId(t.id)}
-                    onDelete={() => {
-                      if (selectedTemplateId === t.id) setSelectedTemplateId(null);
-                      formTemplatesApi.delete(t.id).then(() =>
-                        queryClient.invalidateQueries({ queryKey: ["form-templates"] })
-                      );
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+          <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 4 }}>
+            Used to determine "Subject Premises," "Subject Premises and more," or "NOT Subject Premises" for each instrument. If left blank, the AI will use the legal description from the document.
+          </p>
+        </div>
       </SectionCard>
 
       {/* Section 3: Analysis Options */}
@@ -455,64 +480,71 @@ export default function ChainOfTitlePage() {
               <><Play size={18} /> Analyze</>
             )}
           </button>
-          <div style={{ position: "relative", display: "flex", borderRadius: "var(--ls-radius-md)", overflow: "visible", border: "1px solid var(--ls-border)" }}>
+          <div style={{ display: "flex", borderRadius: "var(--ls-radius-md)", overflow: "hidden", border: "1px solid var(--ls-border)" }}>
             {(["pdf", "docx"] as const).map((fmt) => (
               <button
                 key={fmt}
-                onClick={() => {
-                  if (fmt === "pdf" && selectedTemplateIsDocx) {
-                    setShowPdfWarning(true);
-                    setTimeout(() => setShowPdfWarning(false), 4000);
-                    return;
-                  }
-                  setOutputFormat(fmt);
-                  setShowPdfWarning(false);
-                }}
+                onClick={() => setOutputFormat(fmt)}
                 style={{
                   padding: "10px 16px", border: "none",
-                  backgroundColor: (selectedTemplateIsDocx ? fmt === "docx" : outputFormat === fmt) ? "var(--ls-primary)" : "var(--ls-bg)",
-                  color: (selectedTemplateIsDocx ? fmt === "docx" : outputFormat === fmt) ? "var(--ls-text-on-primary)" : "var(--ls-text-secondary)",
-                  fontWeight: (selectedTemplateIsDocx ? fmt === "docx" : outputFormat === fmt) ? 700 : 400,
-                  fontSize: "var(--ls-text-sm)", cursor: fmt === "pdf" && selectedTemplateIsDocx ? "not-allowed" : "pointer",
+                  backgroundColor: outputFormat === fmt ? "var(--ls-primary)" : "var(--ls-bg)",
+                  color: outputFormat === fmt ? "var(--ls-text-on-primary)" : "var(--ls-text-secondary)",
+                  fontWeight: outputFormat === fmt ? 700 : 400,
+                  fontSize: "var(--ls-text-sm)", cursor: "pointer",
                   borderRight: fmt === "pdf" ? "1px solid var(--ls-border)" : "none",
-                  borderRadius: fmt === "pdf" ? "var(--ls-radius-md) 0 0 var(--ls-radius-md)" : "0 var(--ls-radius-md) var(--ls-radius-md) 0",
-                  opacity: fmt === "pdf" && selectedTemplateIsDocx ? 0.5 : 1,
                 }}
               >
                 {fmt === "pdf" ? "PDF" : "DOCX"}
               </button>
             ))}
-            {showPdfWarning && (
-              <div style={{
-                position: "absolute", bottom: "calc(100% + 8px)", right: 0, zIndex: 10,
-                backgroundColor: "var(--ls-bg-card)", border: "1px solid var(--ls-warning, #e6a817)",
-                borderRadius: "var(--ls-radius-md)", padding: "10px 14px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)", width: 280,
-                fontSize: "var(--ls-text-xs)", color: "var(--ls-text-secondary)", lineHeight: 1.5,
-              }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                  <AlertTriangle size={16} style={{ color: "var(--ls-warning, #e6a817)", flexShrink: 0, marginTop: 1 }} />
-                  <span>
-                    PDF output is not available when using a DOCX form template. The output must be DOCX to preserve the template's exact formatting, images, and layout.
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
         </div>
+        {isAnalyzing && (
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)", marginTop: "var(--ls-space-xs)" }}>
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)",
+            }}>
+              <Clock size={12} />
+              {polledAnalysis?.progress_step
+                ? PROGRESS_STEPS[polledAnalysis.progress_step as keyof typeof PROGRESS_STEPS]?.label ?? "Processing..."
+                : "Processing..."}
+              {" · "}
+              {(() => {
+                const m = Math.floor(elapsedSeconds / 60);
+                const s = elapsedSeconds % 60;
+                return m > 0 ? `${m}m ${s}s elapsed` : `${s}s elapsed`;
+              })()}
+            </span>
+            <button
+              onClick={() => cancelMutation.mutate()}
+              disabled={cancelMutation.isPending}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "4px 12px", borderRadius: "var(--ls-radius-md)",
+                border: "1px solid rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.08)",
+                color: "#ef4444", fontSize: "var(--ls-text-xs)", fontWeight: 600,
+                cursor: cancelMutation.isPending ? "not-allowed" : "pointer",
+              }}
+            >
+              <XCircle size={12} />
+              {cancelMutation.isPending ? "Cancelling..." : "Cancel"}
+            </button>
+          </div>
+        )}
         {!selectedDocId && <HintText>Select a document above</HintText>}
         {selectedDocId && !hasApiKey && <HintText>Configure an API key in Settings</HintText>}
       </div>
 
-      {/* Progress Tracker */}
-      {isAnalyzing && polledAnalysis && (
-        <AnalysisProgressTracker analysis={polledAnalysis} elapsedSeconds={elapsedSeconds} />
-      )}
+      {/* Progress Note */}
 
       {/* Current Result */}
       {(currentResult || (pollingDone && polledAnalysis)) && (
-        <SectionCard title="Result">
-          <AnalysisResultCard analysis={(currentResult || polledAnalysis)!} />
+        <SectionCard title="Result" onClose={() => setCurrentResult(null)}>
+          <AnalysisResultCard
+            analysis={(currentResult || polledAnalysis)!}
+            onReview={(id) => navigate(`/review/${id}`)}
+          />
         </SectionCard>
       )}
 
@@ -525,6 +557,7 @@ export default function ChainOfTitlePage() {
                 key={a.id}
                 analysis={a}
                 onView={() => setCurrentResult(a)}
+                onReview={() => navigate(`/review/${a.id}`)}
               />
             ))}
           </div>
@@ -536,102 +569,33 @@ export default function ChainOfTitlePage() {
 
 // -- Subcomponents --
 
-function AnalysisProgressTracker({ analysis, elapsedSeconds }: { analysis: COTAnalysis; elapsedSeconds: number }) {
-  const steps = PROGRESS_STEP_ORDER;
-  const currentIndex = steps.indexOf(analysis.progress_step as typeof steps[number]);
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return m > 0 ? `${m}m ${s}s` : `${s}s`;
-  };
-
+function SectionCard({ title, children, onClose }: { title: string; children: React.ReactNode; onClose?: () => void }) {
   return (
     <div style={{
       padding: "var(--ls-space-lg)", backgroundColor: "var(--ls-surface)",
       border: "1px solid var(--ls-border)", borderRadius: "var(--ls-radius-lg)",
       marginBottom: "var(--ls-space-lg)",
     }}>
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        marginBottom: "var(--ls-space-md)",
-      }}>
-        <h3 style={{ fontWeight: 600, fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)" }}>
-          Analysis in Progress
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--ls-space-md)" }}>
+        <h3 style={{ fontWeight: 600, fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)", margin: 0 }}>
+          {title}
         </h3>
-        <span style={{
-          display: "inline-flex", alignItems: "center", gap: "var(--ls-space-xs)",
-          fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)",
-        }}>
-          <Clock size={12} />
-          {formatTime(elapsedSeconds)}
-        </span>
+        {onClose && (
+          <button
+            onClick={onClose}
+            title="Close"
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 24, height: 24, borderRadius: "var(--ls-radius-md)",
+              border: "1px solid var(--ls-border)", backgroundColor: "transparent",
+              color: "var(--ls-text-muted)", cursor: "pointer",
+            }}
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
-
-      <div style={{ display: "grid", gap: "var(--ls-space-xs)" }}>
-        {steps.map((step, index) => {
-          const info = PROGRESS_STEPS[step];
-          const isComplete = step === "complete"
-            ? analysis.progress_step === "complete"
-            : currentIndex > index;
-          const isCurrent = step === analysis.progress_step;
-          const isPending = !isComplete && !isCurrent;
-
-          return (
-            <div
-              key={step}
-              style={{
-                display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
-                padding: "var(--ls-space-sm) var(--ls-space-md)",
-                borderRadius: "var(--ls-radius-md)",
-                backgroundColor: isCurrent ? "rgba(59,130,246,0.06)" : isComplete ? "rgba(34,197,94,0.04)" : "transparent",
-                border: isCurrent ? "1px solid rgba(59,130,246,0.2)" : "1px solid transparent",
-              }}
-            >
-              <div style={{ flexShrink: 0 }}>
-                {isComplete ? (
-                  <CheckCircle size={18} style={{ color: "#22c55e" }} />
-                ) : isCurrent ? (
-                  <Loader size={18} className="spin" style={{ color: "#3b82f6" }} />
-                ) : (
-                  <div style={{
-                    width: 18, height: 18, borderRadius: "50%",
-                    border: "2px solid var(--ls-border)",
-                  }} />
-                )}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{
-                  fontSize: "var(--ls-text-sm)",
-                  fontWeight: isCurrent ? 600 : 400,
-                  color: isPending ? "var(--ls-text-muted)" : "var(--ls-text)",
-                }}>
-                  {info.label}
-                </div>
-                {isCurrent && (
-                  <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 2 }}>
-                    {info.description}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{
-      padding: "var(--ls-space-lg)", backgroundColor: "var(--ls-surface)",
-      border: "1px solid var(--ls-border)", borderRadius: "var(--ls-radius-lg)",
-      marginBottom: "var(--ls-space-lg)",
-    }}>
-      <h3 style={{ fontWeight: 600, marginBottom: "var(--ls-space-md)", fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)" }}>
-        {title}
-      </h3>
       {children}
     </div>
   );
@@ -695,169 +659,27 @@ function DocSelectItem({ document: doc, selected, onSelect, onEdit }: {
   );
 }
 
-function TemplateItem({ template, selected, onSelect, onDelete }: {
-  template: FormTemplate; selected: boolean; onSelect: () => void; onDelete: () => void;
-}) {
-  return (
-    <div
-      onClick={onSelect}
-      style={{
-        display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
-        padding: "var(--ls-space-sm) var(--ls-space-md)", cursor: "pointer",
-        borderRadius: "var(--ls-radius-md)",
-        border: selected ? "1px solid var(--ls-primary)" : "1px solid transparent",
-        backgroundColor: selected ? "rgba(139,105,20,0.06)" : "var(--ls-bg)",
-      }}
-    >
-      <FileText size={16} style={{ color: "var(--ls-accent)", flexShrink: 0 }} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500 }}>{template.name}</div>
-        <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
-          {template.original_filename} &middot; {formatFileSize(template.file_size)}
-        </div>
-      </div>
-      {selected && <CheckCircle size={16} style={{ color: "var(--ls-primary)", flexShrink: 0, marginRight: 4 }} />}
-      <button
-        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        style={{
-          display: "flex", alignItems: "center", padding: 4, borderRadius: "var(--ls-radius-sm)",
-          border: "none", backgroundColor: "transparent", cursor: "pointer", color: "var(--ls-text-muted)",
-        }}
-        title="Delete template"
-      >
-        <Trash2 size={14} />
-      </button>
-    </div>
-  );
-}
-
-function TemplateUploadForm({ onClose, onUploaded }: { onClose: () => void; onUploaded: (id: string) => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [error, setError] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const mutation = useMutation({
-    mutationFn: () => {
-      if (!file || !name) throw new Error("Name and file required");
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("name", name);
-      if (description) fd.append("description", description);
-      return formTemplatesApi.upload(fd);
-    },
-    onSuccess: (res) => onUploaded(res.data.id),
-    onError: () => setError("Failed to upload template. Only PDF and DOCX files are allowed."),
-  });
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--ls-space-md)" }}>
-        <span style={{ fontWeight: 500, fontSize: "var(--ls-text-sm)" }}>Upload New Template</span>
-        <button onClick={onClose} style={{ display: "flex", border: "none", background: "none", cursor: "pointer", color: "var(--ls-text-muted)" }}>
-          <X size={16} />
-        </button>
-      </div>
-      {error && <p style={{ color: "var(--ls-error)", fontSize: "var(--ls-text-xs)", marginBottom: "var(--ls-space-sm)" }}>{error}</p>}
-
-      <div style={{ display: "grid", gap: "var(--ls-space-sm)" }}>
-        <div>
-          <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
-            Template Name *
-          </label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Standard COT Form"
-            style={{
-              width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
-              border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
-              fontSize: "var(--ls-text-sm)", outline: "none",
-            }}
-          />
-        </div>
-
-        <div>
-          <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
-            File (DOCX) *
-          </label>
-          <div
-            onClick={() => fileRef.current?.click()}
-            style={{
-              border: "2px dashed var(--ls-border)", borderRadius: "var(--ls-radius-md)",
-              padding: "var(--ls-space-md)", textAlign: "center", cursor: "pointer",
-              backgroundColor: file ? "rgba(34,197,94,0.05)" : undefined,
-            }}
-          >
-            <input ref={fileRef} type="file" accept=".docx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ display: "none" }} />
-            {file ? (
-              <p style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500 }}>{file.name}</p>
-            ) : (
-              <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)" }}>Click to select DOCX file</p>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "flex-start", marginTop: 6 }}>
-            <Info size={13} style={{ color: "var(--ls-text-muted)", flexShrink: 0, marginTop: 1 }} />
-            <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", lineHeight: 1.4 }}>
-              DOCX templates preserve exact formatting, images, and layout in the output. PDF files cannot be used as form templates.
-            </span>
-          </div>
-        </div>
-
-        <div>
-          <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
-            Description (optional)
-          </label>
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Brief description of this template..."
-            style={{
-              width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
-              border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
-              fontSize: "var(--ls-text-sm)", outline: "none",
-            }}
-          />
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: "var(--ls-space-sm)", marginTop: "var(--ls-space-md)" }}>
-        <button
-          onClick={() => mutation.mutate()}
-          disabled={!file || !name || mutation.isPending}
-          style={{
-            padding: "8px 20px", borderRadius: "var(--ls-radius-md)",
-            backgroundColor: (!file || !name) ? "var(--ls-border)" : "var(--ls-primary)",
-            color: (!file || !name) ? "var(--ls-text-muted)" : "var(--ls-text-on-primary)",
-            fontWeight: 600, fontSize: "var(--ls-text-sm)", border: "none",
-            cursor: (!file || !name) ? "not-allowed" : "pointer",
-          }}
-        >
-          {mutation.isPending ? "Uploading..." : "Upload Template"}
-        </button>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "8px 20px", borderRadius: "var(--ls-radius-md)",
-            backgroundColor: "transparent", color: "var(--ls-text-secondary)",
-            fontWeight: 500, fontSize: "var(--ls-text-sm)", border: "1px solid var(--ls-border)", cursor: "pointer",
-          }}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function AnalysisResultCard({ analysis }: { analysis: COTAnalysis }) {
+function AnalysisResultCard({ analysis, onReview }: { analysis: COTAnalysis; onReview?: (id: string) => void }) {
   const isError = analysis.status === "failed";
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)", marginBottom: "var(--ls-space-md)" }}>
         <StatusBadge status={analysis.status} />
+        {analysis.status === "completed" && onReview && (
+          <button
+            onClick={() => onReview(analysis.id)}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "3px 10px", borderRadius: "var(--ls-radius-md)",
+              border: "1px solid var(--ls-primary)", backgroundColor: "rgba(139,105,20,0.08)",
+              color: "var(--ls-primary)", fontSize: "var(--ls-text-xs)", fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            <Eye size={12} /> Review
+          </button>
+        )}
         {analysis.ai_provider && (
           <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
             via {analysis.ai_provider}
@@ -868,6 +690,16 @@ function AnalysisResultCard({ analysis }: { analysis: COTAnalysis }) {
             &middot; {analysis.document_name}
           </span>
         )}
+        {(analysis.status === "completed" || analysis.status === "failed") && analysis.created_at && analysis.updated_at && (() => {
+          const secs = Math.round((new Date(analysis.updated_at).getTime() - new Date(analysis.created_at).getTime()) / 1000);
+          if (secs <= 0) return null;
+          const m = Math.floor(secs / 60), s = secs % 60;
+          return (
+            <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
+              &middot; {m > 0 ? `${m}m ${s}s` : `${s}s`}
+            </span>
+          );
+        })()}
       </div>
 
       {/* Generated Document Link */}
@@ -914,26 +746,12 @@ function AnalysisResultCard({ analysis }: { analysis: COTAnalysis }) {
             {analysis.error_message || "Unknown error"}
           </pre>
         </div>
-      ) : (
-        <div style={{
-          padding: "var(--ls-space-md)", backgroundColor: "var(--ls-bg)",
-          border: "1px solid var(--ls-border)", borderRadius: "var(--ls-radius-md)",
-          maxHeight: 500, overflowY: "auto",
-        }}>
-          <pre style={{
-            fontSize: "var(--ls-text-sm)", color: "var(--ls-text)",
-            whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0,
-            fontFamily: "var(--ls-font-mono)", lineHeight: 1.6,
-          }}>
-            {analysis.result_text || "No result text available."}
-          </pre>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function PastAnalysisItem({ analysis, onView }: { analysis: COTAnalysis; onView: () => void }) {
+function PastAnalysisItem({ analysis, onView, onReview }: { analysis: COTAnalysis; onView: () => void; onReview: () => void }) {
   return (
     <div
       onClick={onView}
@@ -947,13 +765,43 @@ function PastAnalysisItem({ analysis, onView }: { analysis: COTAnalysis; onView:
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {analysis.document_name ?? "Unknown document"}
-          {analysis.form_template_name && <span style={{ color: "var(--ls-text-muted)" }}> &rarr; {analysis.form_template_name}</span>}
         </div>
         <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
           {new Date(analysis.created_at).toLocaleString()}
           {analysis.ai_provider && <> &middot; {analysis.ai_provider}</>}
         </div>
       </div>
+      {analysis.status === "completed" && analysis.generated_document_url && analysis.generated_document_name && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            documentsApi.download(analysis.generated_document_url!, analysis.generated_document_name!);
+          }}
+          title={`Download ${analysis.output_format?.toUpperCase() ?? "file"}`}
+          style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 28, height: 28, borderRadius: "var(--ls-radius-md)",
+            border: "1px solid var(--ls-border)", backgroundColor: "transparent",
+            color: "var(--ls-text-secondary)", cursor: "pointer", flexShrink: 0,
+          }}
+        >
+          <Download size={14} />
+        </button>
+      )}
+      {analysis.status === "completed" && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onReview(); }}
+          title="Review"
+          style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 28, height: 28, borderRadius: "var(--ls-radius-md)",
+            border: "1px solid var(--ls-border)", backgroundColor: "transparent",
+            color: "var(--ls-primary)", cursor: "pointer", flexShrink: 0,
+          }}
+        >
+          <Eye size={14} />
+        </button>
+      )}
       <StatusBadge status={analysis.status} />
     </div>
   );
@@ -988,18 +836,21 @@ function HintText({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DocMetadataModal({ title, fileName, fileSize, initialTract, initialHolder, isPending, onSave, onClose }: {
+function DocMetadataModal({ title, fileName, fileSize, initialTract, initialHolder, isPending, folders, initialFolderId, onSave, onClose }: {
   title: string;
   fileName: string;
   fileSize: number;
   initialTract: string;
   initialHolder: string;
   isPending: boolean;
-  onSave: (tractNumber: string, lastRecordHolder: string) => void;
+  folders?: DocumentFolder[];
+  initialFolderId?: string;
+  onSave: (tractNumber: string, lastRecordHolder: string, folderId?: string) => void;
   onClose: () => void;
 }) {
   const [tract, setTract] = useState(initialTract);
   const [holder, setHolder] = useState(initialHolder);
+  const [folderId, setFolderId] = useState(initialFolderId || "");
 
   const inputStyle = {
     width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
@@ -1055,11 +906,22 @@ function DocMetadataModal({ title, fileName, fileSize, initialTract, initialHold
             </label>
             <input value={holder} onChange={(e) => setHolder(e.target.value)} placeholder="e.g. John Smith" style={inputStyle} />
           </div>
+          {folders && folders.length > 0 && (
+            <div>
+              <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
+                Folder <span style={{ fontWeight: 400, color: "var(--ls-text-muted)" }}>(optional)</span>
+              </label>
+              <select value={folderId} onChange={(e) => setFolderId(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+                <option value="">No folder</option>
+                {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: "var(--ls-space-sm)" }}>
           <button
-            onClick={() => onSave(tract, holder)}
+            onClick={() => onSave(tract, holder, folderId || undefined)}
             disabled={isPending}
             style={{
               padding: "8px 20px", borderRadius: "var(--ls-radius-md)",

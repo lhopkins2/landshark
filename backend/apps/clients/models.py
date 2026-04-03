@@ -11,6 +11,13 @@ class Client(TimestampedModel):
         INDIVIDUAL = "individual", "Individual"
         OTHER = "other", "Other"
 
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="clients",
+        null=True,
+        blank=True,
+    )
     name = models.CharField(max_length=255)
     client_type = models.CharField(max_length=20, choices=ClientType.choices, default=ClientType.LAW_FIRM)
     primary_contact_name = models.CharField(max_length=255, blank=True, default="")

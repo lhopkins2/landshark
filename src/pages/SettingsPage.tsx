@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Sun, Moon, LogOut, Save, Check, RefreshCw } from "lucide-react";
+import { Sun, Moon, LogOut, Save, Check, RefreshCw, Info } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useThemeStore } from "../stores/themeStore";
-import { useAuthStore } from "../stores/authStore";
+import { useAuthStore, selectHasApiKeyAccess } from "../stores/authStore";
 import { analysisSettingsApi } from "../api/analysis";
 import { AI_PROVIDERS, AI_MODELS } from "../utils/constants";
 import type { AIProvider } from "../types/models";
@@ -10,6 +10,7 @@ import type { AIProvider } from "../types/models";
 export default function SettingsPage() {
   const { theme, toggleTheme } = useThemeStore();
   const { user, logout } = useAuthStore();
+  const hasApiKeyAccess = useAuthStore(selectHasApiKeyAccess);
 
   return (
     <div>
@@ -54,7 +55,34 @@ export default function SettingsPage() {
       </div>
 
       {/* AI Configuration */}
-      <AIConfigSection />
+      {hasApiKeyAccess ? (
+        <AIConfigSection />
+      ) : (
+        <div style={{
+          padding: "var(--ls-space-lg)",
+          backgroundColor: "var(--ls-surface)",
+          border: "1px solid var(--ls-border)",
+          borderRadius: "var(--ls-radius-lg)",
+          marginBottom: "var(--ls-space-lg)",
+        }}>
+          <h3 style={{ fontWeight: 600, marginBottom: "var(--ls-space-md)", fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)" }}>
+            AI Configuration
+          </h3>
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--ls-space-sm)",
+            padding: "var(--ls-space-md)",
+            backgroundColor: "var(--ls-surface-2)",
+            borderRadius: "var(--ls-radius-md)",
+            fontSize: "var(--ls-text-sm)",
+            color: "var(--ls-text-secondary)",
+          }}>
+            <Info size={16} />
+            Your organization's API keys are managed by an admin.
+          </div>
+        </div>
+      )}
 
       {/* Profile */}
       {user && (

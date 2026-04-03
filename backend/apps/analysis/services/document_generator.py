@@ -1,10 +1,16 @@
 import io
 import re
 from copy import deepcopy
+from pathlib import Path
+
+_FONTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "fonts"
+_FONT_REGULAR = str(_FONTS_DIR / "DejaVuSans.ttf")
+_FONT_BOLD = str(_FONTS_DIR / "DejaVuSans-Bold.ttf")
 
 from docx import Document as DocxDocument
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import Pt
+from docx.shared import Inches, Pt
 from fpdf import FPDF
 from fpdf.enums import TableBordersLayout
 from fpdf.fonts import FontFace
@@ -49,12 +55,17 @@ def generate_docx(text: str, title: str = "") -> io.BytesIO:
             if table_rows:
                 num_cols = len(table_rows[0])
                 table = doc.add_table(rows=len(table_rows), cols=num_cols, style="Table Grid")
+                # Narrow page-number columns
+                for col_idx, header in enumerate(table_rows[0]):
+                    if _is_page_col(header):
+                        table.columns[col_idx].width = Inches(0.55)
                 for row_idx, row_data in enumerate(table_rows):
                     for col_idx, cell_text in enumerate(row_data[:num_cols]):
                         cell = table.cell(row_idx, col_idx)
                         cell.text = cell_text
                         for paragraph in cell.paragraphs:
                             paragraph.style.font.size = Pt(9)
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                     # Bold the header row
                     if row_idx == 0:
                         for col_idx in range(num_cols):
@@ -72,10 +83,22 @@ def generate_docx(text: str, title: str = "") -> io.BytesIO:
     return buf
 
 
+def _clean_cell_text(text: str) -> str:
+    """Normalize whitespace in a table cell value.
+
+    Collapses tabs, multiple spaces, and embedded newlines so cell content
+    is always clean single-line text suitable for PDF/DOCX rendering.
+    """
+    text = re.sub(r"[\t\r\f\v]+", " ", text)   # tabs → space
+    text = re.sub(r"\n+", " ", text)             # newlines → space
+    text = re.sub(r" {2,}", " ", text)           # collapse runs of spaces
+    return text.strip()
+
+
 def _parse_table_row(line: str) -> list[str]:
     """Parse a markdown table row into cell values."""
     cells = line.strip().strip("|").split("|")
-    return [c.strip() for c in cells]
+    return [_clean_cell_text(c) for c in cells]
 
 
 def _is_table_row(line: str) -> bool:
@@ -86,6 +109,22 @@ def _is_table_separator(line: str) -> bool:
     return bool(re.match(r"^\|[-:| ]+\|$", line))
 
 
+def _is_page_col(header: str) -> bool:
+    """Return True if the header looks like a page-number column (Doc Pg, Page, Pg, etc.)."""
+    norm = re.sub(r"[^a-z]", "", header.lower())
+    return norm in ("docpg", "page", "pages", "pg")
+
+
+def _compute_col_widths(headers: list[str], total_width: float) -> list[float]:
+    """Compute column widths, giving page-number columns a narrow fixed width."""
+    narrow = 18  # mm — just enough for "91-96"
+    narrow_count = sum(1 for h in headers if _is_page_col(h))
+    normal_count = len(headers) - narrow_count
+    remaining = total_width - (narrow * narrow_count)
+    normal_width = remaining / normal_count if normal_count else total_width / len(headers)
+    return [narrow if _is_page_col(h) else normal_width for h in headers]
+
+
 def _render_pdf_table(pdf: FPDF, rows: list[list[str]]) -> None:
     """Render collected markdown table rows as a proper fpdf2 table."""
     if not rows:
@@ -93,41 +132,45 @@ def _render_pdf_table(pdf: FPDF, rows: list[list[str]]) -> None:
 
     num_cols = len(rows[0])
 
-    # Switch to landscape if too many columns for portrait
-    if num_cols > 7:
-        pdf.add_page(orientation="L")
-
     heading_style = FontFace(emphasis="BOLD", size_pt=8)
-    pdf.set_font("Helvetica", "", 8)
+    pdf.set_font("DejaVu", "", 8)
+
+    # Compute column widths — narrow for page-number columns
+    table_width = pdf.epw  # effective page width (minus margins)
+    col_widths = _compute_col_widths(rows[0], table_width) if num_cols > 0 else None
 
     with pdf.table(
         borders_layout=TableBordersLayout.ALL,
         first_row_as_headings=True,
         headings_style=heading_style,
         line_height=5,
+        align="LEFT",
+        col_widths=col_widths,
     ) as table:
         for row_data in rows:
             row = table.row()
             # Pad or truncate to match header column count
             padded = row_data[:num_cols] + [""] * max(0, num_cols - len(row_data))
             for cell_text in padded:
-                row.cell(cell_text)
+                row.cell(cell_text, align="LEFT")
 
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font("DejaVu", "", 10)
 
 
 def generate_pdf(text: str, title: str = "") -> io.BytesIO:
     """Generate a PDF file from analysis result text."""
     pdf = FPDF()
+    pdf.add_font("DejaVu", "", _FONT_REGULAR)
+    pdf.add_font("DejaVu", "B", _FONT_BOLD)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
     if title:
-        pdf.set_font("Helvetica", "B", 14)
+        pdf.set_font("DejaVu", "B", 14)
         pdf.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
 
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font("DejaVu", "", 10)
 
     lines = text.split("\n")
     i = 0
@@ -139,17 +182,17 @@ def generate_pdf(text: str, title: str = "") -> io.BytesIO:
             continue
 
         if stripped.startswith("### "):
-            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_font("DejaVu", "B", 11)
             pdf.cell(0, 7, stripped[4:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 10)
+            pdf.set_font("DejaVu", "", 10)
         elif stripped.startswith("## "):
-            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_font("DejaVu", "B", 12)
             pdf.cell(0, 8, stripped[3:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 10)
+            pdf.set_font("DejaVu", "", 10)
         elif stripped.startswith("# "):
-            pdf.set_font("Helvetica", "B", 14)
+            pdf.set_font("DejaVu", "B", 14)
             pdf.cell(0, 10, stripped[2:], new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 10)
+            pdf.set_font("DejaVu", "", 10)
         elif _is_table_row(stripped):
             # Collect all consecutive table rows
             table_rows: list[list[str]] = []
@@ -211,21 +254,69 @@ def _extract_data_rows_from_ai_text(text: str) -> list[list[str]]:
     return rows
 
 
+def _collect_all_tables(doc: DocxDocument):
+    """Recursively collect all tables in the document, including nested ones."""
+    tables = []
+
+    def _recurse(element):
+        for table in getattr(element, "tables", []):
+            tables.append(table)
+            for row in table.rows:
+                for cell in row.cells:
+                    _recurse(cell)
+
+    _recurse(doc)
+    return tables
+
+
 def _find_data_table(doc: DocxDocument):
-    """Find the main data table in the template (the one with the most columns)."""
-    if not doc.tables:
+    """Find the main data table in the template.
+
+    Searches all tables (including nested ones inside cells) and returns the
+    one whose "column header row" has the most unique non-empty cells — that
+    is the actual data table, not a wrapper or header-fields table.
+    """
+    all_tables = _collect_all_tables(doc)
+    if not all_tables:
         return None
-    return max(doc.tables, key=lambda t: len(t.columns) if t.rows else 0)
+
+    best_table = None
+    best_score = 0
+    for table in all_tables:
+        for row in table.rows:
+            unique = {c.text.strip() for c in row.cells if c.text.strip()}
+            if len(unique) > best_score:
+                best_score = len(unique)
+                best_table = table
+
+    return best_table
 
 
-def _get_template_row(table) -> int:
+def _find_column_header_row(table) -> int:
+    """Find the row that serves as the column header for data rows.
+
+    This is the row with the most unique non-empty cell values — it contains
+    headings like 'Document Caption', 'Grantor', 'Grantee', etc.
+    Returns the row index (0-based).
+    """
+    best_idx = 0
+    best_count = 0
+    for i, row in enumerate(table.rows):
+        unique = {c.text.strip() for c in row.cells if c.text.strip()}
+        if len(unique) > best_count:
+            best_count = len(unique)
+            best_idx = i
+    return best_idx
+
+
+def _get_template_row(table, header_row_idx: int) -> int:
     """Return the index of the row to use as a formatting template.
 
-    Prefers the first data row (index 1+). Falls back to the header row (0).
+    Prefers a data row after the column header. Falls back to the header row.
     """
-    if len(table.rows) > 1:
+    if len(table.rows) > header_row_idx + 1:
         return len(table.rows) - 1  # last row — usually a blank data row
-    return 0
+    return header_row_idx
 
 
 def _set_cell_text_preserving_format(tc_elem, text: str):
@@ -315,7 +406,9 @@ def _fill_header_fields_in_doc(doc: DocxDocument, fields: dict[str, str]):
                 )
 
     # Pattern 2: table cells (label cell followed by empty value cell)
-    for table in doc.tables:
+    # Search all tables including nested ones
+    all_tables = _collect_all_tables(doc)
+    for table in all_tables:
         for row in table.rows:
             cells = row.cells
             for i, cell in enumerate(cells):
@@ -359,14 +452,18 @@ def generate_from_docx_template(template_file_field, ai_text: str) -> io.BytesIO
         # No table in template — fall back to from-scratch generation
         return generate_docx(ai_text)
 
+    # Find the column header row (e.g. "Document Caption | Grantor | ...")
+    # Everything at and before this row is kept; rows after are data placeholders.
+    col_header_idx = _find_column_header_row(target_table)
+
     # Identify the template row (the row we'll clone for formatting)
-    tmpl_row_idx = _get_template_row(target_table)
+    tmpl_row_idx = _get_template_row(target_table, col_header_idx)
     template_tr = deepcopy(target_table.rows[tmpl_row_idx]._tr)
 
-    # Remove all data rows (everything after the header row).
-    # The header row is row 0; data/placeholder rows are row 1+.
+    # Remove all rows AFTER the column header row (these are data/placeholder rows).
+    # Keep rows 0..col_header_idx (header fields + column header).
     trs_to_remove = []
-    for i in range(1, len(target_table.rows)):
+    for i in range(col_header_idx + 1, len(target_table.rows)):
         trs_to_remove.append(target_table.rows[i]._tr)
     for tr in trs_to_remove:
         target_table._tbl.remove(tr)
