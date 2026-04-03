@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate
+from django.db import transaction
 from rest_framework import serializers
 
 from .models import Membership, User
@@ -20,10 +21,14 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "email", "is_verified"]
 
     def _get_membership(self, obj):
-        try:
-            return obj.membership
-        except Membership.DoesNotExist:
-            return None
+        # Cache on the instance to avoid repeated DB hits per serializer method
+        cache_attr = "_cached_membership"
+        if not hasattr(obj, cache_attr):
+            try:
+                setattr(obj, cache_attr, obj.membership)
+            except Membership.DoesNotExist:
+                setattr(obj, cache_attr, None)
+        return getattr(obj, cache_attr)
 
     def get_role(self, obj):
         m = self._get_membership(obj)
@@ -56,6 +61,8 @@ class LoginSerializer(serializers.Serializer):
         user = authenticate(email=attrs["email"], password=attrs["password"])
         if not user:
             raise serializers.ValidationError("Invalid email or password.")
+        if not user.is_verified:
+            raise serializers.ValidationError("Your account has not been verified yet.")
         attrs["user"] = user
         return attrs
 
@@ -63,7 +70,8 @@ class LoginSerializer(serializers.Serializer):
 class MemberSerializer(serializers.Serializer):
     """Read-only serializer for listing org members."""
 
-    id = serializers.UUIDField(source="user.id")
+    id = serializers.UUIDField()
+    user_id = serializers.IntegerField(source="user.id")
     email = serializers.EmailField(source="user.email")
     first_name = serializers.CharField(source="user.first_name")
     last_name = serializers.CharField(source="user.last_name")
@@ -92,6 +100,7 @@ class CreateMemberSerializer(serializers.Serializer):
             attrs["has_api_key_access"] = True
         return attrs
 
+    @transaction.atomic
     def create(self, validated_data):
         org = self.context["organization"]
         user = User.objects.create_user(
@@ -115,6 +124,7 @@ class UpdateMemberSerializer(serializers.Serializer):
     has_api_key_access = serializers.BooleanField(required=False)
     is_active = serializers.BooleanField(required=False)
 
+    @transaction.atomic
     def update(self, membership, validated_data):
         if "role" in validated_data:
             membership.role = validated_data["role"]

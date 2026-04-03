@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from apps.core.models import TimestampedModel
 
@@ -22,7 +21,7 @@ def document_upload_path(instance, filename):
         org_id = _get_org_id(instance.uploaded_by)
     else:
         org_id = "unassigned"
-    return f"org-{org_id}/documents/{datetime.now():%Y/%m}/{filename}"
+    return f"org-{org_id}/documents/{timezone.now():%Y/%m}/{filename}"
 
 
 class DocumentFolder(TimestampedModel):
@@ -30,6 +29,13 @@ class DocumentFolder(TimestampedModel):
 
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="document_folders",
+        null=True,
+        blank=True,
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

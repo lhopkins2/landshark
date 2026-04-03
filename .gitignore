@@ -34,3 +34,6 @@ __pycache__/
 
 # Operations
 .env.ops
+
+# MCP config (contains API tokens)
+.mcp.json

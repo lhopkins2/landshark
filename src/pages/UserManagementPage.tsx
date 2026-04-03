@@ -25,7 +25,7 @@ export default function UserManagementPage() {
       setShowCreateModal(false);
       setCreateError(null);
     },
-    onError: (err: any) => {
+    onError: (err: { response?: { data?: Record<string, string[]> } }) => {
       const detail = err?.response?.data;
       if (typeof detail === "object") {
         const messages = Object.values(detail).flat().join(". ");
@@ -125,7 +125,7 @@ export default function UserManagementPage() {
             </thead>
             <tbody>
               {members.map((member) => {
-                const isSelf = String(member.id) === String(currentUser?.id);
+                const isSelf = String(member.user_id) === String(currentUser?.id);
                 const isEditing = editingMember === member.id;
                 return (
                   <tr

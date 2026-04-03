@@ -1,22 +1,26 @@
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import FileResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
+from apps.accounts.mixins import OrgScopedViewMixin
+
 from .models import Document, DocumentFolder
 from .serializers import DocumentFolderSerializer, DocumentSerializer, DocumentUploadSerializer
 
 
-class DocumentFolderViewSet(viewsets.ModelViewSet):
-    queryset = DocumentFolder.objects.all()
+class DocumentFolderViewSet(OrgScopedViewMixin, viewsets.ModelViewSet):
+    queryset = DocumentFolder.objects.annotate(document_count=Count("documents")).all()
     serializer_class = DocumentFolderSerializer
     search_fields = ["name"]
     ordering_fields = ["name", "created_at"]
+    org_field = "organization"
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        org = self.get_org()
+        serializer.save(created_by=self.request.user, organization=org if org else None)
 
 
 class DocumentViewSet(viewsets.ModelViewSet):
@@ -64,10 +68,10 @@ class DocumentViewSet(viewsets.ModelViewSet):
         if not document.file:
             return Response({"detail": "No file attached."}, status=status.HTTP_404_NOT_FOUND)
         response = FileResponse(document.file.open("rb"), content_type=document.mime_type or "application/octet-stream")
-        if request.query_params.get("inline") == "true":
-            response["Content-Disposition"] = f'inline; filename="{document.original_filename}"'
-        else:
-            response["Content-Disposition"] = f'attachment; filename="{document.original_filename}"'
+        # Sanitize filename: strip quotes, newlines, and control chars to prevent header injection
+        safe_name = document.original_filename.replace('"', "'").replace("\n", "").replace("\r", "")
+        disposition = "inline" if request.query_params.get("inline") == "true" else "attachment"
+        response["Content-Disposition"] = f'{disposition}; filename="{safe_name}"'
         return response
 
     @action(detail=True, methods=["get"], url_path="extract-text")
@@ -92,9 +96,17 @@ class DocumentViewSet(viewsets.ModelViewSet):
         folder = None
         if folder_id:
             try:
+                # Scope folder lookup to user's org via the folder viewset's queryset
                 folder = DocumentFolder.objects.get(id=folder_id)
+                # Verify org ownership for non-developers
+                user = request.user
+                if not getattr(user, "is_developer", False):
+                    membership = getattr(user, "membership", None)
+                    if not membership or (folder.organization and folder.organization != membership.organization):
+                        return Response({"detail": "Folder not found."}, status=status.HTTP_404_NOT_FOUND)
             except DocumentFolder.DoesNotExist:
                 return Response({"detail": "Folder not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        updated = Document.objects.filter(id__in=doc_ids).update(folder=folder)
+        # Use the org-scoped queryset so users can only move their own documents
+        updated = self.get_queryset().filter(id__in=doc_ids).update(folder=folder)
         return Response({"moved": updated})

@@ -1,5 +1,6 @@
 """Background tasks for COT analysis, executed by Django-Q2."""
 
+import logging
 import os
 
 from django.contrib.auth import get_user_model
@@ -12,6 +13,8 @@ from .models import COTAnalysis
 from .services.ai_providers import build_prompt_content, run_analysis
 from .services.document_generator import generate_document
 from .services.document_parser import MAX_PAGES_REDUCED, extract_text_from_file, is_pdf, render_pdf_pages
+
+logger = logging.getLogger(__name__)
 
 
 class _AnalysisCancelledError(Exception):
@@ -125,19 +128,19 @@ def run_analysis_task(
         )
         generated_doc.file.save(generated_filename, ContentFile(buf.read()), save=True)
 
-        # Step 5: Complete
+        _check_cancelled(analysis_id)
+
+        # Step 5: Complete — use update_fields to avoid overwriting a concurrent cancel
         analysis.generated_document = generated_doc
         analysis.status = COTAnalysis.Status.COMPLETED
         analysis.progress_step = COTAnalysis.ProgressStep.COMPLETE
-        analysis.save()
+        analysis.save(update_fields=["generated_document", "status", "progress_step", "updated_at"])
 
     except _AnalysisCancelledError:
         pass
 
     except Exception as e:
-        import traceback
-
-        traceback.print_exc()
+        logger.exception("Analysis %s failed", analysis_id)
         try:
             analysis = COTAnalysis.objects.get(id=analysis_id)
             analysis.error_message = str(e)
@@ -145,7 +148,7 @@ def run_analysis_task(
             analysis.progress_step = COTAnalysis.ProgressStep.FAILED
             analysis.save()
         except Exception:
-            pass
+            logger.exception("Failed to save error state for analysis %s", analysis_id)
 
     finally:
         connections.close_all()

@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 from encrypted_model_fields.fields import EncryptedCharField
 
 from apps.core.models import TimestampedModel
@@ -14,7 +13,7 @@ def _template_upload_path(instance, filename):
         org_id = str(membership.organization_id) if membership else "unassigned"
     else:
         org_id = "unassigned"
-    return f"org-{org_id}/form_templates/{datetime.now():%Y/%m}/{filename}"
+    return f"org-{org_id}/form_templates/{timezone.now():%Y/%m}/{filename}"
 
 
 class FormTemplate(TimestampedModel):

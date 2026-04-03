@@ -53,11 +53,51 @@ class FormTemplateUploadSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-class UserSettingsSerializer(serializers.ModelSerializer):
+class _APIKeySettingsSerializer(serializers.ModelSerializer):
+    """Base serializer for models with API key fields and provider/model defaults."""
+
     anthropic_api_key_display = serializers.SerializerMethodField()
     openai_api_key_display = serializers.SerializerMethodField()
     gemini_api_key_display = serializers.SerializerMethodField()
 
+    _KEY_FIELDS = ["anthropic_api_key", "openai_api_key", "gemini_api_key"]
+
+    def _mask_key(self, key):
+        if not key:
+            return ""
+        return "\u2022" * 8 + key[-4:]
+
+    def get_anthropic_api_key_display(self, obj):
+        return self._mask_key(obj.anthropic_api_key)
+
+    def get_openai_api_key_display(self, obj):
+        return self._mask_key(obj.openai_api_key)
+
+    def get_gemini_api_key_display(self, obj):
+        return self._mask_key(obj.gemini_api_key)
+
+    # Sentinel value to explicitly clear an API key (empty string is ignored
+    # to avoid accidental clears from form submissions that omit the field).
+    CLEAR_KEY = "CLEAR"
+
+    def update(self, instance, validated_data):
+        for key_field in self._KEY_FIELDS:
+            value = validated_data.get(key_field)
+            if value is None or value == "":
+                continue  # field not submitted or blank — no change
+            if value == self.CLEAR_KEY:
+                setattr(instance, key_field, "")
+            else:
+                setattr(instance, key_field, value)
+        if "default_provider" in validated_data:
+            instance.default_provider = validated_data["default_provider"]
+        if "default_model" in validated_data:
+            instance.default_model = validated_data["default_model"]
+        instance.save()
+        return instance
+
+
+class UserSettingsSerializer(_APIKeySettingsSerializer):
     class Meta:
         model = UserSettings
         fields = [
@@ -78,41 +118,8 @@ class UserSettingsSerializer(serializers.ModelSerializer):
             "gemini_api_key": {"write_only": True, "required": False},
         }
 
-    def _mask_key(self, key):
-        if not key:
-            return ""
-        return "\u2022" * 8 + key[-4:]
 
-    def get_anthropic_api_key_display(self, obj):
-        return self._mask_key(obj.anthropic_api_key)
-
-    def get_openai_api_key_display(self, obj):
-        return self._mask_key(obj.openai_api_key)
-
-    def get_gemini_api_key_display(self, obj):
-        return self._mask_key(obj.gemini_api_key)
-
-    def update(self, instance, validated_data):
-        # Only update keys that are non-empty (don't clear existing keys with blank submission)
-        for key_field in ["anthropic_api_key", "openai_api_key", "gemini_api_key"]:
-            value = validated_data.get(key_field)
-            if value is not None and value != "":
-                setattr(instance, key_field, value)
-            if key_field in validated_data and validated_data[key_field] == "":
-                validated_data.pop(key_field)
-        if "default_provider" in validated_data:
-            instance.default_provider = validated_data["default_provider"]
-        if "default_model" in validated_data:
-            instance.default_model = validated_data["default_model"]
-        instance.save()
-        return instance
-
-
-class OrganizationSettingsSerializer(serializers.ModelSerializer):
-    anthropic_api_key_display = serializers.SerializerMethodField()
-    openai_api_key_display = serializers.SerializerMethodField()
-    gemini_api_key_display = serializers.SerializerMethodField()
-
+class OrganizationSettingsSerializer(_APIKeySettingsSerializer):
     class Meta:
         model = OrganizationSettings
         fields = [
@@ -132,34 +139,6 @@ class OrganizationSettingsSerializer(serializers.ModelSerializer):
             "openai_api_key": {"write_only": True, "required": False},
             "gemini_api_key": {"write_only": True, "required": False},
         }
-
-    def _mask_key(self, key):
-        if not key:
-            return ""
-        return "\u2022" * 8 + key[-4:]
-
-    def get_anthropic_api_key_display(self, obj):
-        return self._mask_key(obj.anthropic_api_key)
-
-    def get_openai_api_key_display(self, obj):
-        return self._mask_key(obj.openai_api_key)
-
-    def get_gemini_api_key_display(self, obj):
-        return self._mask_key(obj.gemini_api_key)
-
-    def update(self, instance, validated_data):
-        for key_field in ["anthropic_api_key", "openai_api_key", "gemini_api_key"]:
-            value = validated_data.get(key_field)
-            if value is not None and value != "":
-                setattr(instance, key_field, value)
-            if key_field in validated_data and validated_data[key_field] == "":
-                validated_data.pop(key_field)
-        if "default_provider" in validated_data:
-            instance.default_provider = validated_data["default_provider"]
-        if "default_model" in validated_data:
-            instance.default_model = validated_data["default_model"]
-        instance.save()
-        return instance
 
 
 class COTAnalysisSerializer(serializers.ModelSerializer):

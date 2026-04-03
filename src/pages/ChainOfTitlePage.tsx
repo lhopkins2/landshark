@@ -177,6 +177,7 @@ export default function ChainOfTitlePage() {
       hasHandledCompletion.current = true;
       setCurrentResult(polledAnalysis);
       setElapsedSeconds(0);
+      setPollingAnalysisId(null);
       queryClient.invalidateQueries({ queryKey: ["analyses"] });
       queryClient.invalidateQueries({ queryKey: ["documents"] });
     }
@@ -813,6 +814,7 @@ function StatusBadge({ status }: { status: string }) {
     failed: { bg: "rgba(239,68,68,0.1)", text: "#ef4444", icon: <XCircle size={12} /> },
     processing: { bg: "rgba(59,130,246,0.1)", text: "#3b82f6", icon: <Loader size={12} className="spin" /> },
     pending: { bg: "rgba(234,179,8,0.1)", text: "#eab308", icon: <Clock size={12} /> },
+    cancelled: { bg: "rgba(156,163,175,0.1)", text: "#9ca3af", icon: <XCircle size={12} /> },
   };
   const c = colors[status] ?? colors.pending;
   const label = ANALYSIS_STATUSES[status as keyof typeof ANALYSIS_STATUSES] ?? status;

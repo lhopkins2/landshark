@@ -27,6 +27,14 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function DeveloperRoute({ children }: { children: React.ReactNode }) {
+  const isDeveloper = useAuthStore((s) => s.user?.is_developer);
+  if (!isDeveloper) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -45,7 +53,7 @@ export default function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="review/:analysisId" element={<ReviewPage />} />
         <Route path="users" element={<AdminRoute><UserManagementPage /></AdminRoute>} />
-        <Route path="troubleshooting" element={<TroubleshootingPage />} />
+        <Route path="troubleshooting" element={<DeveloperRoute><TroubleshootingPage /></DeveloperRoute>} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

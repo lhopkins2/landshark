@@ -22,6 +22,19 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
   const isDocx = mimeType?.includes("wordprocessingml") || mimeType?.includes("msword");
   const isPdf = mimeType?.includes("pdf");
 
+  // Clear cached state when documentId changes so stale content is never shown
+  const prevDocIdRef = useRef(documentId);
+  useEffect(() => {
+    if (prevDocIdRef.current !== documentId) {
+      prevDocIdRef.current = documentId;
+      setText(null);
+      setDocHtml(null);
+      if (blobUrl) window.URL.revokeObjectURL(blobUrl);
+      setBlobUrl(null);
+      setError(null);
+    }
+  }, [documentId, blobUrl]);
+
   // Fetch content when mode or documentId changes
   useEffect(() => {
     let cancelled = false;
@@ -98,11 +111,11 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
 
   // Clean up blob URL on unmount
   useEffect(() => {
+    const url = blobUrl;
     return () => {
-      if (blobUrl) window.URL.revokeObjectURL(blobUrl);
+      if (url) window.URL.revokeObjectURL(url);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [blobUrl]);
 
   // Sanitized via DOMPurify before setting dangerouslySetInnerHTML below
   const highlightedHtml = useMemo(() => {

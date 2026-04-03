@@ -21,6 +21,10 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Mutex for token refresh — prevents concurrent 401 handlers from each
+// trying to refresh (and blacklisting) the same token.
+let refreshPromise: Promise<string> | null = null;
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -30,21 +34,29 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = useAuthStore.getState().refreshToken;
-        if (!refreshToken) {
-          throw new Error("No refresh token");
+        // If a refresh is already in-flight, wait for it instead of starting another
+        if (!refreshPromise) {
+          refreshPromise = (async () => {
+            const refreshToken = useAuthStore.getState().refreshToken;
+            if (!refreshToken) {
+              throw new Error("No refresh token");
+            }
+            const { data } = await refreshClient.post("/auth/token/refresh/", {
+              refresh: refreshToken,
+            });
+            useAuthStore.getState().setTokens(data.access, data.refresh);
+            return data.access as string;
+          })();
         }
 
-        const { data } = await refreshClient.post("/auth/token/refresh/", {
-          refresh: refreshToken,
-        });
-
-        useAuthStore.getState().setTokens(data.access, data.refresh);
-        originalRequest.headers.Authorization = `Bearer ${data.access}`;
+        const newAccessToken = await refreshPromise;
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
         return apiClient(originalRequest);
       } catch {
         useAuthStore.getState().logout();
         window.location.href = "/login";
+      } finally {
+        refreshPromise = null;
       }
     }
 

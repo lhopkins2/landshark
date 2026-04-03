@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ---------------------------------------------------------------------------
 SECRET_KEY = config("DJANGO_SECRET_KEY", default="django-insecure-landshark-group-dev-key-change-in-production")
 DEBUG = config("DJANGO_DEBUG", default="True", cast=bool)
-ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS", default="*", cast=Csv())
+ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1", cast=Csv())
 
 # ---------------------------------------------------------------------------
 # Apps
@@ -78,11 +78,14 @@ WSGI_APPLICATION = "config.wsgi.application"
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
+_database_url = config("DATABASE_URL", default="")
 DATABASES = {
-    "default": dj_database_url.config(
-        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+    "default": dj_database_url.parse(
+        _database_url,
         conn_max_age=600,
     )
+    if _database_url
+    else {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}
 }
 
 # ---------------------------------------------------------------------------
@@ -107,7 +110,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # ---------------------------------------------------------------------------
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = timedelta(minutes=15)
-AXES_LOCKOUT_PARAMETERS = ["ip_address", "username"]
+AXES_LOCKOUT_PARAMETERS = [["ip_address"], ["username"]]
 AXES_RESET_ON_SUCCESS = True
 
 # ---------------------------------------------------------------------------
@@ -190,7 +193,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # ---------------------------------------------------------------------------
 # Field encryption (django-encrypted-model-fields)
 # ---------------------------------------------------------------------------
-FIELD_ENCRYPTION_KEY = config("FIELD_ENCRYPTION_KEY", default="")
+# Dev-only default key — MUST be overridden via env var in production.
+FIELD_ENCRYPTION_KEY = config("FIELD_ENCRYPTION_KEY", default="Ptro9TId8Cjhb61B2j36tObrFqPg7MS2aEVz6wFcmsg=")
 
 # ---------------------------------------------------------------------------
 # Django-Q2 (background task queue)

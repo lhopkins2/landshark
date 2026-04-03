@@ -40,12 +40,16 @@ class LogoutView(APIView):
 
     def post(self, request):
         refresh_token = request.data.get("refresh")
-        if refresh_token:
-            try:
-                token = RefreshToken(refresh_token)
-                token.blacklist()
-            except Exception:
-                pass
+        if not refresh_token:
+            return Response(status=status.HTTP_205_RESET_CONTENT)
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        except Exception:
+            return Response(
+                {"detail": "Token could not be blacklisted. You are logged out locally."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         return Response(status=status.HTTP_205_RESET_CONTENT)
 
 
@@ -66,10 +70,14 @@ class OrgMemberListCreateView(APIView):
             return None
 
     def get(self, request):
-        org = self._get_org(request.user)
-        if not org:
-            return Response([], status=status.HTTP_200_OK)
-        members = Membership.objects.filter(organization=org).select_related("user").order_by("user__email")
+        if getattr(request.user, "is_developer", False) and not self._get_org(request.user):
+            # Developers without a membership see all members
+            members = Membership.objects.select_related("user", "organization").order_by("user__email")
+        else:
+            org = self._get_org(request.user)
+            if not org:
+                return Response([], status=status.HTTP_200_OK)
+            members = Membership.objects.filter(organization=org).select_related("user").order_by("user__email")
         return Response(MemberSerializer(members, many=True).data)
 
     def post(self, request):
@@ -86,15 +94,22 @@ class OrgMemberDetailView(APIView):
     permission_classes = [IsAuthenticated, IsOrgAdmin]
 
     def _get_membership(self, request, pk):
-        """Get a membership by user ID, scoped to the requesting user's org."""
+        """Get a membership by its UUID PK, scoped to the requesting user's org."""
+        try:
+            membership = Membership.objects.select_related("user", "organization").get(pk=pk)
+        except Membership.DoesNotExist:
+            return None
+        # Developers can access any membership
+        if getattr(request.user, "is_developer", False):
+            return membership
+        # Non-developers can only access members in their own org
         try:
             requesting_org = request.user.membership.organization
         except Membership.DoesNotExist:
             return None
-        try:
-            return Membership.objects.select_related("user").get(user_id=pk, organization=requesting_org)
-        except Membership.DoesNotExist:
+        if membership.organization != requesting_org:
             return None
+        return membership
 
     def get(self, request, pk):
         membership = self._get_membership(request, pk)
@@ -106,9 +121,14 @@ class OrgMemberDetailView(APIView):
         membership = self._get_membership(request, pk)
         if not membership:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        # Prevent admins from demoting themselves
-        if membership.user == request.user and request.data.get("role") == "operator":
-            return Response({"detail": "You cannot change your own role."}, status=status.HTTP_400_BAD_REQUEST)
+        # Prevent self-modification of role or active status
+        if membership.user == request.user:
+            if request.data.get("role") == "operator":
+                return Response({"detail": "You cannot change your own role."}, status=status.HTTP_400_BAD_REQUEST)
+            if request.data.get("is_active") is False:
+                return Response(
+                    {"detail": "You cannot deactivate yourself."}, status=status.HTTP_400_BAD_REQUEST
+                )
         serializer = UpdateMemberSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.update(membership, serializer.validated_data)

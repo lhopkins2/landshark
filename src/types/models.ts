@@ -173,6 +173,7 @@ export interface AuthUser {
 
 export interface OrgMember {
   id: string;
+  user_id: number;
   email: string;
   first_name: string;
   last_name: string;

@@ -33,6 +33,37 @@ export default function Sidebar() {
   const isDeveloper = user?.is_developer ?? false;
   const canManageUsers = useAuthStore(selectCanManageUsers);
 
+  const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties => ({
+    display: "flex",
+    alignItems: "center",
+    gap: "var(--ls-space-sm)",
+    padding: collapsed ? "var(--ls-space-sm)" : "var(--ls-space-sm) var(--ls-space-lg)",
+    margin: "2px var(--ls-space-sm)",
+    borderRadius: "var(--ls-radius-md)",
+    fontSize: "var(--ls-text-sm)",
+    fontWeight: isActive ? 600 : 400,
+    color: isActive ? "var(--ls-primary)" : "var(--ls-text-secondary)",
+    backgroundColor: isActive ? "var(--ls-surface-2)" : "transparent",
+    textDecoration: "none",
+    transition: "all var(--ls-transition-fast)",
+    justifyContent: collapsed ? "center" : "flex-start",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+  });
+
+  const dividerStyle: React.CSSProperties = {
+    height: 1, backgroundColor: "var(--ls-border)",
+    margin: "var(--ls-space-sm) var(--ls-space-md)",
+  };
+
+  const renderNavItems = (items: typeof navItems, useEnd = false) =>
+    items.map(({ to, icon: Icon, label }) => (
+      <NavLink key={to} to={to} end={useEnd && to === "/"} title={collapsed ? label : undefined} style={navLinkStyle}>
+        <Icon size={18} style={{ flexShrink: 0 }} />
+        {!collapsed && label}
+      </NavLink>
+    ));
+
   return (
     <aside
       style={{
@@ -91,112 +122,19 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav style={{ flex: 1 }}>
-        {navItems.map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/"}
-            title={collapsed ? label : undefined}
-            style={({ isActive }) => ({
-              display: "flex",
-              alignItems: "center",
-              gap: "var(--ls-space-sm)",
-              padding: collapsed
-                ? "var(--ls-space-sm)"
-                : "var(--ls-space-sm) var(--ls-space-lg)",
-              margin: "2px var(--ls-space-sm)",
-              borderRadius: "var(--ls-radius-md)",
-              fontSize: "var(--ls-text-sm)",
-              fontWeight: isActive ? 600 : 400,
-              color: isActive ? "var(--ls-primary)" : "var(--ls-text-secondary)",
-              backgroundColor: isActive ? "var(--ls-surface-2)" : "transparent",
-              textDecoration: "none",
-              transition: "all var(--ls-transition-fast)",
-              justifyContent: collapsed ? "center" : "flex-start",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-            })}
-          >
-            <Icon size={18} style={{ flexShrink: 0 }} />
-            {!collapsed && label}
-          </NavLink>
-        ))}
+        {renderNavItems(navItems, true)}
 
-        {/* Admin-only nav */}
         {canManageUsers && (
           <>
-            <div style={{
-              height: 1, backgroundColor: "var(--ls-border)",
-              margin: "var(--ls-space-sm) var(--ls-space-md)",
-            }} />
-            {adminNavItems.map(({ to, icon: Icon, label }) => (
-              <NavLink
-                key={to}
-                to={to}
-                title={collapsed ? label : undefined}
-                style={({ isActive }) => ({
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "var(--ls-space-sm)",
-                  padding: collapsed
-                    ? "var(--ls-space-sm)"
-                    : "var(--ls-space-sm) var(--ls-space-lg)",
-                  margin: "2px var(--ls-space-sm)",
-                  borderRadius: "var(--ls-radius-md)",
-                  fontSize: "var(--ls-text-sm)",
-                  fontWeight: isActive ? 600 : 400,
-                  color: isActive ? "var(--ls-primary)" : "var(--ls-text-secondary)",
-                  backgroundColor: isActive ? "var(--ls-surface-2)" : "transparent",
-                  textDecoration: "none",
-                  transition: "all var(--ls-transition-fast)",
-                  justifyContent: collapsed ? "center" : "flex-start",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                })}
-              >
-                <Icon size={18} style={{ flexShrink: 0 }} />
-                {!collapsed && label}
-              </NavLink>
-            ))}
+            <div style={dividerStyle} />
+            {renderNavItems(adminNavItems)}
           </>
         )}
 
-        {/* Developer-only nav */}
         {isDeveloper && (
           <>
-            <div style={{
-              height: 1, backgroundColor: "var(--ls-border)",
-              margin: "var(--ls-space-sm) var(--ls-space-md)",
-            }} />
-            {devNavItems.map(({ to, icon: Icon, label }) => (
-              <NavLink
-                key={to}
-                to={to}
-                title={collapsed ? label : undefined}
-                style={({ isActive }) => ({
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "var(--ls-space-sm)",
-                  padding: collapsed
-                    ? "var(--ls-space-sm)"
-                    : "var(--ls-space-sm) var(--ls-space-lg)",
-                  margin: "2px var(--ls-space-sm)",
-                  borderRadius: "var(--ls-radius-md)",
-                  fontSize: "var(--ls-text-sm)",
-                  fontWeight: isActive ? 600 : 400,
-                  color: isActive ? "var(--ls-primary)" : "var(--ls-text-secondary)",
-                  backgroundColor: isActive ? "var(--ls-surface-2)" : "transparent",
-                  textDecoration: "none",
-                  transition: "all var(--ls-transition-fast)",
-                  justifyContent: collapsed ? "center" : "flex-start",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                })}
-              >
-                <Icon size={18} style={{ flexShrink: 0 }} />
-                {!collapsed && label}
-              </NavLink>
-            ))}
+            <div style={dividerStyle} />
+            {renderNavItems(devNavItems)}
           </>
         )}
       </nav>

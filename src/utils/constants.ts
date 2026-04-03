@@ -1,24 +1,3 @@
-export const CLIENT_TYPES = {
-  law_firm: "Law Firm",
-  lender: "Lender",
-  real_estate_agency: "Real Estate Agency",
-  individual: "Individual",
-  other: "Other",
-} as const;
-
-export const PROJECT_STATUSES = {
-  active: "Active",
-  completed: "Completed",
-  on_hold: "On Hold",
-  cancelled: "Cancelled",
-} as const;
-
-export const CHAIN_STATUSES = {
-  pending: "Pending",
-  in_progress: "In Progress",
-  complete: "Complete",
-} as const;
-
 export const ANALYSIS_ORDERS = {
   chronological: "Chronological Order",
   reverse_chronological: "Reverse Chronological Order",

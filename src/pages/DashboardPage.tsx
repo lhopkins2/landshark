@@ -50,14 +50,12 @@ function FeatureCard({
   icon: Icon,
   title,
   description,
-  badge,
   stat,
 }: {
   to: string;
   icon: typeof Link2;
   title: string;
   description: string;
-  badge?: string;
   stat?: string;
 }) {
   return (
@@ -91,16 +89,6 @@ function FeatureCard({
           <Icon size={20} style={{ color: "var(--ls-primary)" }} />
         </div>
         <h3 style={{ fontWeight: 700, fontSize: "var(--ls-text-lg)" }}>{title}</h3>
-        {badge && (
-          <span style={{
-            padding: "2px 10px", borderRadius: "var(--ls-radius-full)",
-            fontSize: "var(--ls-text-xs)", fontWeight: 600,
-            backgroundColor: "rgba(245,158,11,0.1)", color: "var(--ls-warning)",
-            marginLeft: "auto",
-          }}>
-            {badge}
-          </span>
-        )}
       </div>
       <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)", lineHeight: 1.6 }}>
         {description}

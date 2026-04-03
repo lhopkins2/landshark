@@ -6,15 +6,12 @@ from .models import Document, DocumentFolder
 
 
 class DocumentFolderSerializer(serializers.ModelSerializer):
-    document_count = serializers.SerializerMethodField()
+    document_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = DocumentFolder
         fields = ["id", "name", "description", "document_count", "created_by", "created_at", "updated_at"]
         read_only_fields = ["id", "created_by"]
-
-    def get_document_count(self, obj):
-        return obj.documents.count()
 
 
 class DocumentSerializer(serializers.ModelSerializer):
@@ -65,6 +62,20 @@ class DocumentUploadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
         fields = ["file", "chain_of_title", "folder", "tract_number", "last_record_holder", "description"]
+
+    def validate_chain_of_title(self, value):
+        if value is None:
+            return value
+        user = self.context["request"].user
+        if getattr(user, "is_developer", False):
+            return value
+        membership = getattr(user, "membership", None)
+        if not membership:
+            raise serializers.ValidationError("You do not belong to an organization.")
+        org = membership.organization
+        if value.project and value.project.client and value.project.client.organization != org:
+            raise serializers.ValidationError("Chain of title does not belong to your organization.")
+        return value
 
     def create(self, validated_data):
         uploaded_file = validated_data["file"]

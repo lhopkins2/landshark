@@ -79,9 +79,20 @@ def resolve_api_config(user):
 
 class FormTemplateViewSet(viewsets.ModelViewSet):
     queryset = FormTemplate.objects.select_related("uploaded_by").all()
+    permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     search_fields = ["name", "description"]
     ordering_fields = ["name", "created_at"]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if getattr(user, "is_developer", False):
+            return qs
+        membership = getattr(user, "membership", None)
+        if not membership:
+            return qs.none()
+        return qs.filter(uploaded_by__membership__organization=membership.organization)
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -206,7 +217,20 @@ class RunAnalysisView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            document = Document.objects.get(id=serializer.validated_data["document_id"])
+            doc_qs = Document.objects.all()
+            user = request.user
+            if not getattr(user, "is_developer", False):
+                from django.db.models import Q
+
+                membership = getattr(user, "membership", None)
+                if not membership:
+                    return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
+                org = membership.organization
+                doc_qs = doc_qs.filter(
+                    Q(chain_of_title__project__client__organization=org)
+                    | Q(chain_of_title__isnull=True, uploaded_by__membership__organization=org)
+                )
+            document = doc_qs.get(id=serializer.validated_data["document_id"])
         except Document.DoesNotExist:
             return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
 

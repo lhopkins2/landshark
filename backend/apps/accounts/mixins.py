@@ -1,3 +1,6 @@
+_NO_ORG = object()  # sentinel: user has no org (should see nothing)
+
+
 class OrgScopedViewMixin:
     """Mixin that filters querysets to the user's organization."""
 
@@ -8,11 +11,15 @@ class OrgScopedViewMixin:
         if getattr(user, "is_developer", False):
             return None  # developers see everything
         membership = getattr(user, "membership", None)
-        return membership.organization if membership else None
+        if membership:
+            return membership.organization
+        return _NO_ORG  # no membership — must see nothing
 
     def get_queryset(self):
         qs = super().get_queryset()
         org = self.get_org()
         if org is None:
-            return qs
+            return qs  # developer bypass
+        if org is _NO_ORG:
+            return qs.none()
         return qs.filter(**{self.org_field: org})

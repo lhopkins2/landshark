@@ -64,8 +64,9 @@ def generate_docx(text: str, title: str = "") -> io.BytesIO:
                         cell = table.cell(row_idx, col_idx)
                         cell.text = cell_text
                         for paragraph in cell.paragraphs:
-                            paragraph.style.font.size = Pt(9)
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            for run in paragraph.runs:
+                                run.font.size = Pt(9)
                     # Bold the header row
                     if row_idx == 0:
                         for col_idx in range(num_cols):

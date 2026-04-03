@@ -33,7 +33,7 @@ export default function DocumentsPage() {
   });
 
   // When viewing "All Documents" (no folder), also fetch unfiled docs
-  const { data: unfiledData } = useQuery({
+  const { data: unfiledData, isLoading: isLoadingUnfiled } = useQuery({
     queryKey: ["documents", { folder__isnull: "true", ...(search ? { search } : {}) }],
     queryFn: () => {
       const p: Record<string, string> = { folder__isnull: "true" };
@@ -469,7 +469,7 @@ export default function DocumentsPage() {
       )}
 
       {/* Document list */}
-      {isLoading ? (
+      {(currentFolderId ? isLoading : isLoadingUnfiled) ? (
         <p style={{ color: "var(--ls-text-muted)" }}>Loading...</p>
       ) : documents.length === 0 && (!folders.length || currentFolderId || search) ? (
         <div style={{

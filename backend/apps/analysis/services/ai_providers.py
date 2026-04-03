@@ -1,4 +1,5 @@
 import base64
+import threading
 from pathlib import Path
 
 from django.conf import settings as django_settings
@@ -47,11 +48,16 @@ def build_prompt_content(
     else:
         preamble = template
 
-    # Substitute template variables in the preamble
-    preamble = preamble.format(
-        analysis_order=order_label,
-        legal_description=legal_description.strip() if legal_description else "(No legal description provided.)",
-        custom_request=custom_request.strip() if custom_request else "(No custom request provided.)",
+    # Substitute template variables in the preamble (use str.replace to avoid
+    # crashes when user-supplied legal_description or custom_request contain braces)
+    preamble = preamble.replace("{analysis_order}", order_label)
+    preamble = preamble.replace(
+        "{legal_description}",
+        legal_description.strip() if legal_description else "(No legal description provided.)",
+    )
+    preamble = preamble.replace(
+        "{custom_request}",
+        custom_request.strip() if custom_request else "(No custom request provided.)",
     )
 
     content = []
@@ -118,6 +124,10 @@ DEFAULT_MAX_TOKENS = 8192
 LARGE_DOC_MAX_TOKENS = 16384
 LARGE_DOC_PAGE_THRESHOLD = 30
 AI_CALL_TIMEOUT = 480  # 8 minutes — fail fast instead of hanging indefinitely
+
+# Lock for Gemini API calls — genai.configure() mutates global state,
+# so concurrent calls with different API keys must be serialized.
+_gemini_lock = threading.Lock()
 
 
 def _max_tokens_for_content(content):
@@ -193,7 +203,14 @@ def call_anthropic(content, api_key, model=""):
         max_tokens=_max_tokens_for_content(blocks),
         messages=[{"role": "user", "content": _format_anthropic(blocks)}],
     )
+    if not message.content:
+        raise ValueError("Anthropic returned an empty response.")
     return message.content[0].text
+
+
+def _is_openai_reasoning_model(model_id):
+    """Return True if the model is an OpenAI reasoning model (o1, o3, o4 series)."""
+    return model_id.startswith(("o1", "o3", "o4"))
 
 
 def call_openai(content, api_key, model=""):
@@ -201,12 +218,23 @@ def call_openai(content, api_key, model=""):
     import openai
 
     blocks = _normalize_content(content)
+    resolved_model = model or DEFAULT_MODELS["openai"]
     client = openai.OpenAI(api_key=api_key, timeout=AI_CALL_TIMEOUT)
+
+    # Reasoning models (o1/o3/o4) require max_completion_tokens instead of max_tokens
+    token_limit = _max_tokens_for_content(blocks)
+    if _is_openai_reasoning_model(resolved_model):
+        token_kwargs = {"max_completion_tokens": token_limit}
+    else:
+        token_kwargs = {"max_tokens": token_limit}
+
     response = client.chat.completions.create(
-        model=model or DEFAULT_MODELS["openai"],
+        model=resolved_model,
         messages=[{"role": "user", "content": _format_openai(blocks)}],
-        max_tokens=_max_tokens_for_content(blocks),
+        **token_kwargs,
     )
+    if not response.choices or not response.choices[0].message.content:
+        raise ValueError("OpenAI returned an empty response.")
     return response.choices[0].message.content
 
 
@@ -215,12 +243,13 @@ def call_gemini(content, api_key, model=""):
     import google.generativeai as genai
 
     blocks = _normalize_content(content)
-    genai.configure(api_key=api_key)
-    genai_model = genai.GenerativeModel(model or DEFAULT_MODELS["gemini"])
-    response = genai_model.generate_content(
-        _format_gemini(blocks),
-        request_options={"timeout": AI_CALL_TIMEOUT},
-    )
+    with _gemini_lock:
+        genai.configure(api_key=api_key)
+        genai_model = genai.GenerativeModel(model or DEFAULT_MODELS["gemini"])
+        response = genai_model.generate_content(
+            _format_gemini(blocks),
+            request_options={"timeout": AI_CALL_TIMEOUT},
+        )
     return response.text
 
 
@@ -308,12 +337,13 @@ def list_gemini_models(api_key):
     """List available Gemini generative models."""
     import google.generativeai as genai
 
-    genai.configure(api_key=api_key)
-    models = [
-        {"id": m.name.replace("models/", ""), "name": m.display_name or m.name}
-        for m in genai.list_models()
-        if "generateContent" in (m.supported_generation_methods or [])
-    ]
+    with _gemini_lock:
+        genai.configure(api_key=api_key)
+        models = [
+            {"id": m.name.replace("models/", ""), "name": m.display_name or m.name}
+            for m in genai.list_models()
+            if "generateContent" in (m.supported_generation_methods or [])
+        ]
     return models
 
 
