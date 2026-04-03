@@ -4,7 +4,7 @@ region: nyc
 services:
   - name: api
     github:
-      repo: YOUR_GITHUB_USERNAME/landshark-group
+      repo: lhopkins2/landshark
       branch: main
       deploy_on_push: true
     source_dir: /
@@ -56,7 +56,7 @@ services:
 
   - name: frontend
     github:
-      repo: YOUR_GITHUB_USERNAME/landshark-group
+      repo: lhopkins2/landshark
       branch: main
       deploy_on_push: true
     source_dir: /
@@ -72,7 +72,7 @@ services:
 workers:
   - name: analysis-worker
     github:
-      repo: YOUR_GITHUB_USERNAME/landshark-group
+      repo: lhopkins2/landshark
       branch: main
       deploy_on_push: true
     source_dir: /
