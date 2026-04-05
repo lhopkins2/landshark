@@ -8,14 +8,23 @@ services:
       branch: main
       deploy_on_push: true
     source_dir: /
+    environment_slug: python
     build_command: cd backend && pip install -e "." && python manage.py collectstatic --noinput
     run_command: cd backend && python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8080 --workers 3 --timeout 120
     http_port: 8080
     instance_size_slug: basic-xs
     instance_count: 1
+    health_check:
+      http_path: /health/
+      initial_delay_seconds: 10
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 9
     routes:
       - path: /api
       - path: /admin
+      - path: /health
     envs:
       - key: DISABLE_COLLECTSTATIC
         value: "1"
@@ -32,6 +41,9 @@ services:
       - key: CORS_ALLOWED_ORIGINS
         value: "https://${APP_DOMAIN}"
         scope: RUN_AND_BUILD_TIME
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://${APP_DOMAIN}"
+        scope: RUN_AND_BUILD_TIME
       - key: DATABASE_URL
         value: "${db.DATABASE_URL}"
         scope: RUN_TIME
@@ -45,7 +57,7 @@ services:
         type: SECRET
         scope: RUN_TIME
       - key: DO_SPACES_BUCKET
-        value: landshark-prod
+        value: landshark-staging
         scope: RUN_TIME
       - key: DO_SPACES_ENDPOINT
         value: https://nyc3.digitaloceanspaces.com
@@ -54,6 +66,7 @@ services:
         value: nyc3
         scope: RUN_TIME
 
+static_sites:
   - name: frontend
     github:
       repo: lhopkins2/landshark
@@ -62,10 +75,9 @@ services:
     source_dir: /
     build_command: npm ci && npm run build
     environment_slug: node-js
-    static_sites:
-      output_dir: dist
-      index_document: index.html
-      catchall_document: index.html
+    output_dir: dist
+    index_document: index.html
+    catchall_document: index.html
     routes:
       - path: /
 
@@ -81,6 +93,9 @@ workers:
     instance_size_slug: basic-xs
     instance_count: 1
     envs:
+      - key: DISABLE_COLLECTSTATIC
+        value: "1"
+        scope: BUILD_TIME
       - key: DJANGO_SECRET_KEY
         type: SECRET
         scope: RUN_AND_BUILD_TIME
@@ -100,7 +115,7 @@ workers:
         type: SECRET
         scope: RUN_TIME
       - key: DO_SPACES_BUCKET
-        value: landshark-prod
+        value: landshark-staging
         scope: RUN_TIME
       - key: DO_SPACES_ENDPOINT
         value: https://nyc3.digitaloceanspaces.com
@@ -108,9 +123,3 @@ workers:
       - key: DO_SPACES_REGION
         value: nyc3
         scope: RUN_TIME
-
-databases:
-  - name: db
-    engine: PG
-    production: true
-    version: "16"

@@ -147,6 +147,11 @@ CORS_ALLOWED_ORIGINS = config(
     default="http://localhost:5174,http://127.0.0.1:5174",
     cast=Csv(),
 )
+CSRF_TRUSTED_ORIGINS = config(
+    "CSRF_TRUSTED_ORIGINS",
+    default="http://localhost:5174,http://127.0.0.1:5174",
+    cast=Csv(),
+)
 
 # ---------------------------------------------------------------------------
 # Internationalization
@@ -212,7 +217,9 @@ Q_CLUSTER = {
 # Production security hardening
 # ---------------------------------------------------------------------------
 if not DEBUG:
-    SECURE_SSL_REDIRECT = True
+    # DO App Platform handles SSL termination at the load balancer.
+    # SECURE_SSL_REDIRECT is disabled to avoid breaking internal health checks.
+    SECURE_SSL_REDIRECT = False
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
