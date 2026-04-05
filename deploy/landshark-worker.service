@@ -1,0 +1,19 @@
+[Unit]
+Description=LandShark Django-Q2 Background Worker
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+User=landshark
+Group=landshark
+WorkingDirectory=/opt/landshark/backend
+EnvironmentFile=/opt/landshark/.env
+ExecStart=/opt/landshark/venv/bin/python manage.py qcluster
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+StandardOutput=append:/var/log/landshark/worker.log
+StandardError=append:/var/log/landshark/worker.log
+
+[Install]
+WantedBy=multi-user.target

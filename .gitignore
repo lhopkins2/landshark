@@ -34,6 +34,10 @@ __pycache__/
 
 # Operations
 .env.ops
+.env
 
 # MCP config (contains API tokens)
 .mcp.json
+
+# Egg info
+*.egg-info/

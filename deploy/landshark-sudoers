@@ -1,0 +1,7 @@
+# Allow landshark user to restart services without password
+# Install: sudo cp deploy/landshark-sudoers /etc/sudoers.d/landshark
+landshark ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart landshark-web
+landshark ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart landshark-worker
+landshark ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload nginx
+landshark ALL=(ALL) NOPASSWD: /usr/bin/systemctl status landshark-web
+landshark ALL=(ALL) NOPASSWD: /usr/bin/systemctl status landshark-worker

@@ -1,0 +1,20 @@
+[Unit]
+Description=LandShark Gunicorn Web Server
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+User=landshark
+Group=landshark
+WorkingDirectory=/opt/landshark/backend
+EnvironmentFile=/opt/landshark/.env
+ExecStart=/opt/landshark/venv/bin/gunicorn config.wsgi:application -c /opt/landshark/deploy/gunicorn.conf.py
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+StandardOutput=append:/var/log/landshark/web.log
+StandardError=append:/var/log/landshark/web.log
+
+[Install]
+WantedBy=multi-user.target
