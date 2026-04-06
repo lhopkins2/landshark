@@ -63,7 +63,7 @@ export default function CreateUserModal({ onClose, onSubmit, isSubmitting, error
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--ls-space-lg)" }}>
-          <h2 style={{ fontSize: "var(--ls-text-lg)", fontWeight: 600, color: "var(--ls-text-primary)", margin: 0 }}>
+          <h2 style={{ fontSize: "var(--ls-text-lg)", fontWeight: 600, color: "var(--ls-text)", margin: 0 }}>
             Create User
           </h2>
           <button

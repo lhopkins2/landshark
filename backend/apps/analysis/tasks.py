@@ -125,6 +125,8 @@ def run_analysis_task(
             last_record_holder=document.last_record_holder,
             description=f"Processed from {document.original_filename}",
             uploaded_by=user,
+            folder=document.folder,
+            chain_of_title=document.chain_of_title,
         )
         generated_doc.file.save(generated_filename, ContentFile(buf.read()), save=True)
 

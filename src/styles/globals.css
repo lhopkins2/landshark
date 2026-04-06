@@ -127,6 +127,104 @@ input, textarea, select {
 }
 
 /* =============================================================================
+   Form Components
+   ============================================================================= */
+
+.ls-input {
+  width: 100%;
+  padding: 10px 12px;
+  background-color: var(--ls-bg);
+  color: var(--ls-text);
+  border: 1px solid var(--ls-border);
+  border-radius: var(--ls-radius-md);
+  font-size: var(--ls-text-sm);
+  transition: border-color var(--ls-transition-fast), box-shadow var(--ls-transition-fast);
+}
+
+.ls-input::placeholder {
+  color: var(--ls-text-muted);
+}
+
+.ls-input:focus {
+  outline: none;
+  border-color: var(--ls-primary);
+  box-shadow: 0 0 0 3px rgba(139, 105, 20, 0.15);
+}
+
+.ls-select-wrapper {
+  position: relative;
+}
+
+.ls-select {
+  width: 100%;
+  padding: 10px 12px;
+  background-color: var(--ls-bg);
+  color: var(--ls-text);
+  border: 1px solid var(--ls-border);
+  border-radius: var(--ls-radius-md);
+  font-size: var(--ls-text-sm);
+  appearance: none;
+  cursor: pointer;
+  transition: border-color var(--ls-transition-fast);
+}
+
+.ls-select:focus {
+  outline: none;
+  border-color: var(--ls-primary);
+  box-shadow: 0 0 0 3px rgba(139, 105, 20, 0.15);
+}
+
+.ls-select-wrapper::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--ls-text-muted);
+  pointer-events: none;
+}
+
+.ls-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ls-space-xs);
+  padding: 10px 20px;
+  font-size: var(--ls-text-sm);
+  font-weight: 500;
+  border-radius: var(--ls-radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color var(--ls-transition-fast), border-color var(--ls-transition-fast);
+}
+
+.ls-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.ls-btn-primary {
+  background-color: var(--ls-primary);
+  color: var(--ls-text-on-primary);
+  border-color: var(--ls-primary);
+}
+
+.ls-btn-primary:hover:not(:disabled) {
+  background-color: var(--ls-primary-hover);
+}
+
+.ls-btn-secondary {
+  background-color: transparent;
+  color: var(--ls-text);
+  border-color: var(--ls-border);
+}
+
+.ls-btn-secondary:hover:not(:disabled) {
+  background-color: var(--ls-surface-hover);
+}
+
+/* =============================================================================
    Review Page
    ============================================================================= */
 
