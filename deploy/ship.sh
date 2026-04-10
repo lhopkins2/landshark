@@ -8,6 +8,7 @@
 set -euo pipefail
 
 SERVER="root@45.55.48.26"
+SSH_KEY="~/.ssh/lshark"
 DEPLOY_CMD="sudo -u landshark bash /opt/landshark/deploy/deploy.sh"
 
 cd "$(git rev-parse --show-toplevel)"
@@ -30,7 +31,7 @@ git push origin main
 
 # Deploy
 echo "Deploying to VPS..."
-ssh "$SERVER" "$DEPLOY_CMD"
+ssh -i "$SSH_KEY" "$SERVER" "$DEPLOY_CMD"
 
 echo ""
 echo "Shipped! Live at https://45-55-48-26.nip.io"
