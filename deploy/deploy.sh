@@ -14,8 +14,11 @@ FRONTEND_DIR="/var/www/landshark/frontend"
 
 # --- App-level steps (run as landshark) ---
 
+# Ensure git trusts the repo directory (root running git on landshark-owned repo)
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+
 echo "==> Pulling latest code..."
-sudo -u landshark bash -c "cd $APP_DIR && git pull origin main"
+sudo -u landshark bash -c "cd $APP_DIR && git config --global --add safe.directory $APP_DIR 2>/dev/null; git pull origin main"
 
 echo "==> Installing Python dependencies..."
 sudo -u landshark "$VENV/bin/pip" install -e "$APP_DIR/backend" --quiet
