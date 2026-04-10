@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, type DragEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, FileText, Plus, Upload, Pencil, X, Download, FolderOpen, Folder, ChevronLeft, FolderPlus, Archive } from "lucide-react";
+import { Search, FileText, Plus, Upload, Pencil, X, Download, FolderOpen, Folder, ChevronLeft, FolderPlus, Archive, AlertTriangle } from "lucide-react";
 import JSZip from "jszip";
 import { documentsApi, foldersApi } from "../api/documents";
 import DocumentDetailDrawer from "../components/DocumentDetailDrawer";
@@ -17,6 +17,7 @@ export default function DocumentsPage() {
   const [editingFolder, setEditingFolder] = useState<DocumentFolder | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [detailDoc, setDetailDoc] = useState<Document | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const queryClient = useQueryClient();
 
   const params: Record<string, string> = {};
@@ -451,7 +452,7 @@ export default function DocumentsPage() {
             onMove={(folderId) => moveToFolderMutation.mutate({ docIds: [...selectedIds], folderId })}
           />
           <button
-            onClick={() => deleteMutation.mutate()}
+            onClick={() => setShowDeleteConfirm(true)}
             disabled={deleteMutation.isPending}
             style={{
               display: "flex", alignItems: "center", gap: 4,
@@ -602,6 +603,63 @@ export default function DocumentsPage() {
           document={detailDoc}
           onClose={() => setDetailDoc(null)}
         />
+      )}
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <div
+          onClick={() => setShowDeleteConfirm(false)}
+          style={{
+            position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: "var(--ls-surface)",
+              border: "1px solid var(--ls-border)",
+              borderRadius: "var(--ls-radius-lg)",
+              padding: "var(--ls-space-xl)",
+              maxWidth: 440, width: "90%",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)", marginBottom: "var(--ls-space-md)" }}>
+              <AlertTriangle size={24} style={{ color: "var(--ls-error, #ef4444)", flexShrink: 0 }} />
+              <h3 style={{ fontSize: "var(--ls-text-lg)", fontWeight: 700 }}>Confirm Deletion</h3>
+            </div>
+            <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)", lineHeight: 1.5, marginBottom: "var(--ls-space-sm)" }}>
+              You are about to delete <strong>{selectedIds.size} document{selectedIds.size !== 1 ? "s" : ""}</strong>.
+            </p>
+            <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-error, #ef4444)", fontWeight: 700, marginBottom: "var(--ls-space-lg)" }}>
+              This will be gone forever. Are you sure?
+            </p>
+            <div style={{ display: "flex", gap: "var(--ls-space-sm)", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                style={{
+                  padding: "8px 20px", borderRadius: "var(--ls-radius-md)",
+                  backgroundColor: "transparent", color: "var(--ls-text-secondary)",
+                  fontWeight: 500, fontSize: "var(--ls-text-sm)",
+                  border: "1px solid var(--ls-border)", cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setShowDeleteConfirm(false); deleteMutation.mutate(); }}
+                style={{
+                  padding: "8px 20px", borderRadius: "var(--ls-radius-md)",
+                  backgroundColor: "var(--ls-error, #ef4444)", color: "#fff",
+                  fontWeight: 600, fontSize: "var(--ls-text-sm)",
+                  border: "none", cursor: "pointer",
+                }}
+              >
+                Yes, Delete Permanently
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

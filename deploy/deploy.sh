@@ -32,6 +32,11 @@ echo "==> Deploying frontend..."
 rm -rf "$FRONTEND_DIR"/*
 cp -r "$APP_DIR/dist/"* "$FRONTEND_DIR/"
 
+echo "==> Updating systemd units..."
+sudo cp "$APP_DIR/deploy/landshark-backup.service" /etc/systemd/system/
+sudo cp "$APP_DIR/deploy/landshark-backup.timer" /etc/systemd/system/
+sudo systemctl daemon-reload
+
 echo "==> Restarting services..."
 sudo systemctl restart landshark-web
 sudo systemctl restart landshark-worker

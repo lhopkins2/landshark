@@ -11,4 +11,5 @@ urlpatterns = [
         enterprise_views.EnterpriseOrgMembersView.as_view(),
         name="enterprise-org-members",
     ),
+    path("api-usage/", enterprise_views.EnterpriseApiUsageView.as_view(), name="enterprise-api-usage"),
 ]

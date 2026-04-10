@@ -205,7 +205,8 @@ def call_anthropic(content, api_key, model=""):
     )
     if not message.content:
         raise ValueError("Anthropic returned an empty response.")
-    return message.content[0].text
+    usage = {"input_tokens": message.usage.input_tokens, "output_tokens": message.usage.output_tokens}
+    return message.content[0].text, usage
 
 
 def _is_openai_reasoning_model(model_id):
@@ -235,7 +236,11 @@ def call_openai(content, api_key, model=""):
     )
     if not response.choices or not response.choices[0].message.content:
         raise ValueError("OpenAI returned an empty response.")
-    return response.choices[0].message.content
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    if response.usage:
+        usage["input_tokens"] = response.usage.prompt_tokens or 0
+        usage["output_tokens"] = response.usage.completion_tokens or 0
+    return response.choices[0].message.content, usage
 
 
 def call_gemini(content, api_key, model=""):
@@ -250,7 +255,11 @@ def call_gemini(content, api_key, model=""):
             _format_gemini(blocks),
             request_options={"timeout": AI_CALL_TIMEOUT},
         )
-    return response.text
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    if hasattr(response, "usage_metadata") and response.usage_metadata:
+        usage["input_tokens"] = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+        usage["output_tokens"] = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
+    return response.text, usage
 
 
 PROVIDER_FUNCTIONS = {
@@ -261,7 +270,7 @@ PROVIDER_FUNCTIONS = {
 
 
 def run_analysis(content, provider, api_key, model=""):
-    """Dispatch to the correct AI provider."""
+    """Dispatch to the correct AI provider. Returns (result_text, usage_dict)."""
     func = PROVIDER_FUNCTIONS.get(provider)
     if not func:
         raise ValueError(f"Unknown provider: {provider}")

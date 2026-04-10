@@ -12,6 +12,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import HasApiKeyAccess, IsOrgAdmin
+from apps.core.audit import log_action
+from apps.core.models import AuditLog
 from apps.documents.models import Document
 
 from .models import COTAnalysis, FormTemplate, OrganizationSettings, UserSettings
@@ -25,61 +27,9 @@ from .serializers import (
     UserSettingsSerializer,
 )
 from .services.ai_providers import list_models
+from .utils import is_qcluster_running, recover_stale_analyses
 
 logger = logging.getLogger(__name__)
-
-# Maximum time (seconds) an analysis can stay in "processing" before being auto-failed.
-STALE_ANALYSIS_TIMEOUT = 660  # 11 minutes (slightly above Q_CLUSTER retry of 660s)
-
-
-def is_qcluster_running():
-    """Check if at least one Django-Q2 cluster is alive.
-
-    Uses Stat.get_all() which reads the cluster heartbeat from the ORM broker.
-    Falls back to checking if any tasks have been processed recently.
-    """
-    try:
-        from django_q.status import Stat
-
-        stats = Stat.get_all()
-        if len(stats) > 0:
-            return True
-    except Exception:
-        pass
-
-    # Fallback: check if any task was processed in the last 5 minutes
-    # (covers cases where Stat doesn't detect the cluster but it's working)
-    try:
-        from django_q.models import Success
-
-        cutoff = timezone.now() - datetime.timedelta(minutes=5)
-        if Success.objects.filter(stopped__gte=cutoff).exists():
-            return True
-    except Exception:
-        pass
-
-    return False
-
-
-def recover_stale_analyses():
-    """Mark analyses stuck in 'processing' beyond the timeout as failed.
-
-    This is called on every analysis poll so that stuck tasks are cleaned up
-    automatically even if no one is actively monitoring.
-    """
-    cutoff = timezone.now() - datetime.timedelta(seconds=STALE_ANALYSIS_TIMEOUT)
-    stale = COTAnalysis.objects.filter(
-        status=COTAnalysis.Status.PROCESSING,
-        created_at__lt=cutoff,
-    )
-    count = stale.update(
-        status=COTAnalysis.Status.FAILED,
-        progress_step=COTAnalysis.ProgressStep.FAILED,
-        error_message="Analysis timed out — the background worker may not have been running. Please try again.",
-    )
-    if count:
-        logger.warning("Auto-failed %d stale analyses that exceeded %ds timeout.", count, STALE_ANALYSIS_TIMEOUT)
-    return count
 
 
 def resolve_api_config(user):
@@ -341,6 +291,21 @@ class RunAnalysisView(APIView):
             created_by=request.user,
         )
 
+        log_action(
+            action=AuditLog.Action.ANALYSIS_RUN,
+            user=request.user,
+            document_name=document.original_filename,
+            document_id=document.id,
+            details={
+                "analysis_id": str(analysis.id),
+                "provider": provider,
+                "model": model,
+                "output_format": output_format,
+                "legal_description": legal_description,
+                "custom_request": custom_request,
+            },
+        )
+
         # Queue background task via Django-Q2
         async_task(
             "apps.analysis.tasks.run_analysis_task",
@@ -473,3 +438,53 @@ class DashboardStatsView(APIView):
             "pending_analyses": pending_analyses,
             "recent_activity": activity,
         })
+
+
+class BackupStatusView(APIView):
+    """GET endpoint to check backup health. Admin/developer only."""
+
+    BACKUP_STATUS_FILE = "/var/log/landshark/backup-status.json"
+    STALENESS_HOURS = 7  # slightly over the 6-hour interval
+
+    def get(self, request):
+        import json
+        from pathlib import Path
+
+        user = request.user
+        is_admin = getattr(user, "is_developer", False)
+        if not is_admin:
+            membership = getattr(user, "membership", None)
+            is_admin = membership and membership.role == "admin"
+        if not is_admin:
+            return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
+
+        status_path = Path(self.BACKUP_STATUS_FILE)
+        if not status_path.exists():
+            return Response(
+                {"healthy": False, "error": "No backup status file found — backups may not be configured."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        try:
+            data = json.loads(status_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            return Response(
+                {"healthy": False, "error": f"Cannot read backup status: {e}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        last_run = datetime.fromisoformat(data["timestamp"])
+        age = timezone.now() - last_run
+        age_hours = age.total_seconds() / 3600
+        healthy = data.get("success", False) and age_hours < self.STALENESS_HOURS
+
+        return Response(
+            {
+                "healthy": healthy,
+                "last_backup": data["timestamp"],
+                "age_hours": round(age_hours, 1),
+                "success": data.get("success", False),
+                "details": data.get("details", {}),
+            },
+            status=status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE,
+        )

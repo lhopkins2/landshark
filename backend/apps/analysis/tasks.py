@@ -90,9 +90,11 @@ def run_analysis_task(
         analysis.progress_step = COTAnalysis.ProgressStep.CALLING_AI
         analysis.save(update_fields=["progress_step", "updated_at"])
 
-        result = run_analysis(content_blocks, provider, api_key, model)
+        result, usage = run_analysis(content_blocks, provider, api_key, model)
         analysis.result_text = result
-        analysis.save(update_fields=["result_text", "updated_at"])
+        analysis.input_tokens = usage.get("input_tokens", 0)
+        analysis.output_tokens = usage.get("output_tokens", 0)
+        analysis.save(update_fields=["result_text", "input_tokens", "output_tokens", "updated_at"])
 
         _check_cancelled(analysis_id)
 

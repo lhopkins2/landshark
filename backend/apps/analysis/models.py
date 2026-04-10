@@ -163,6 +163,8 @@ class COTAnalysis(TimestampedModel):
         choices=OutputFormat.choices,
         default=OutputFormat.PDF,
     )
+    input_tokens = models.PositiveIntegerField(default=0, help_text="Number of input/prompt tokens consumed.")
+    output_tokens = models.PositiveIntegerField(default=0, help_text="Number of output/completion tokens consumed.")
     result_text = models.TextField(blank=True, default="")
     prompt_text = models.TextField(
         blank=True, default="", help_text="Full prompt sent to the AI (text portions only, for debugging)."

@@ -1,0 +1,21 @@
+[Unit]
+Description=LandShark Database & Media Backup
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=landshark
+Group=landshark
+WorkingDirectory=/opt/landshark
+EnvironmentFile=/opt/landshark/.env
+ExecStart=/opt/landshark/venv/bin/python /opt/landshark/deploy/backup.py
+TimeoutStartSec=1800
+StandardOutput=append:/var/log/landshark/backup.log
+StandardError=append:/var/log/landshark/backup.log
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/log/landshark /tmp
+PrivateTmp=yes

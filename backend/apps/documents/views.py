@@ -6,6 +6,8 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.accounts.mixins import OrgScopedViewMixin
+from apps.core.audit import log_action
+from apps.core.models import AuditLog
 
 from .models import Document, DocumentFolder
 from .serializers import DocumentFolderSerializer, DocumentSerializer, DocumentUploadSerializer
@@ -57,10 +59,40 @@ class DocumentViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = serializer.save()
+        log_action(
+            action=AuditLog.Action.UPLOAD,
+            user=request.user,
+            document_name=document.original_filename,
+            document_id=document.id,
+            details={"file_size": document.file_size},
+        )
         return Response(
             DocumentSerializer(document, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+    def update(self, request, *args, **kwargs):
+        document = self.get_object()
+        response = super().update(request, *args, **kwargs)
+        changed = {k: v for k, v in request.data.items() if k not in ("file",)}
+        log_action(
+            action=AuditLog.Action.UPDATE,
+            user=request.user,
+            document_name=document.original_filename,
+            document_id=document.id,
+            details={"changed_fields": list(changed.keys())},
+        )
+        return response
+
+    def destroy(self, request, *args, **kwargs):
+        document = self.get_object()
+        log_action(
+            action=AuditLog.Action.DELETE,
+            user=request.user,
+            document_name=document.original_filename,
+            document_id=document.id,
+        )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
@@ -72,6 +104,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
         safe_name = document.original_filename.replace('"', "'").replace("\n", "").replace("\r", "")
         disposition = "inline" if request.query_params.get("inline") == "true" else "attachment"
         response["Content-Disposition"] = f'{disposition}; filename="{safe_name}"'
+        log_action(
+            action=AuditLog.Action.DOWNLOAD,
+            user=request.user,
+            document_name=document.original_filename,
+            document_id=document.id,
+        )
         return response
 
     @action(detail=True, methods=["get"], url_path="extract-text")

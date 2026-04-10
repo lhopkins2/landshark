@@ -16,4 +16,5 @@ urlpatterns = [
     path("analysis/org-settings/", views.OrgSettingsView.as_view(), name="org-analysis-settings"),
     path("dashboard/stats/", views.DashboardStatsView.as_view(), name="dashboard-stats"),
     path("analysis/worker-health/", views.WorkerHealthView.as_view(), name="worker-health"),
+    path("health/backup/", views.BackupStatusView.as_view(), name="backup-status"),
 ] + router.urls

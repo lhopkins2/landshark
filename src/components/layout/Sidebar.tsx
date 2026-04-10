@@ -6,10 +6,11 @@ import {
   Settings,
   Users,
   Bug,
+  ClipboardList,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
-import { useAuthStore, selectIsAdmin, selectCanManageUsers } from "../../stores/authStore";
+import { useAuthStore, selectCanManageUsers, selectIsDeveloper } from "../../stores/authStore";
 import { useSidebarStore } from "../../stores/sidebarStore";
 
 const navItems = [
@@ -21,6 +22,7 @@ const navItems = [
 
 const adminNavItems = [
   { to: "/users", icon: Users, label: "Users" },
+  { to: "/audit-log", icon: ClipboardList, label: "Audit Log" },
 ];
 
 const devNavItems = [
@@ -29,7 +31,7 @@ const devNavItems = [
 
 export default function Sidebar() {
   const { collapsed, toggleCollapsed } = useSidebarStore();
-  const isAdmin = useAuthStore(selectIsAdmin);
+  const isDeveloper = useAuthStore(selectIsDeveloper);
   const canManageUsers = useAuthStore(selectCanManageUsers);
 
   const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties => ({
@@ -130,7 +132,7 @@ export default function Sidebar() {
           </>
         )}
 
-        {isAdmin && (
+        {isDeveloper && (
           <>
             <div style={dividerStyle} />
             {renderNavItems(devNavItems)}

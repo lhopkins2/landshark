@@ -29,6 +29,26 @@ export interface EnterpriseOrgMember {
   created_at: string;
 }
 
+export interface OrgTokenUsage {
+  org_id: string;
+  org_name: string;
+  analysis_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface ApiUsageResponse {
+  period: string;
+  platform_totals: {
+    analysis_count: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+  organizations: OrgTokenUsage[];
+}
+
 interface PaginatedResponse<T> {
   count: number;
   next: string | null;
@@ -66,4 +86,6 @@ export const enterpriseApi = {
     password: string;
     role: string;
   }) => apiClient.post<EnterpriseOrgMember>(`/enterprise/organizations/${orgId}/members/`, data),
+
+  apiUsage: () => apiClient.get<ApiUsageResponse>("/enterprise/api-usage/"),
 };

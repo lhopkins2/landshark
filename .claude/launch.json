@@ -10,7 +10,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "/Users/liamhopkins/Documents/Title Apps/landshark-group/backend/.venv/bin/python",
-      "runtimeArgs": ["manage.py", "runserver", "8001"],
+      "runtimeArgs": ["manage.py", "devserver", "8001"],
       "cwd": "backend",
       "port": 8001
     },

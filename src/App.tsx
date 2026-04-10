@@ -10,6 +10,7 @@ import SettingsPage from "./pages/SettingsPage";
 import ReviewPage from "./pages/ReviewPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import TroubleshootingPage from "./pages/TroubleshootingPage";
+import AuditLogPage from "./pages/AuditLogPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import EnterpriseLoginPage from "./pages/enterprise/EnterpriseLoginPage";
 import EnterpriseDashboardPage from "./pages/enterprise/EnterpriseDashboardPage";
@@ -27,6 +28,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const canManage = useAuthStore(selectCanManageUsers);
   if (!canManage) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
+function DeveloperRoute({ children }: { children: React.ReactNode }) {
+  const isDeveloper = useAuthStore(selectIsDeveloper);
+  if (!isDeveloper) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -62,7 +71,8 @@ export default function App() {
         <Route path="settings" element={<SettingsPage />} />
         <Route path="review/:analysisId" element={<ReviewPage />} />
         <Route path="users" element={<AdminRoute><UserManagementPage /></AdminRoute>} />
-        <Route path="troubleshooting" element={<AdminRoute><TroubleshootingPage /></AdminRoute>} />
+        <Route path="audit-log" element={<AdminRoute><AuditLogPage /></AdminRoute>} />
+        <Route path="troubleshooting" element={<DeveloperRoute><TroubleshootingPage /></DeveloperRoute>} />
       </Route>
 
       {/* Enterprise routes */}

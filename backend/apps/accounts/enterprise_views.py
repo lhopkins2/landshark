@@ -1,4 +1,5 @@
-from django.db.models import Count
+from django.db.models import Count, Sum
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -87,3 +88,63 @@ class EnterpriseOrgMembersView(APIView):
         serializer.is_valid(raise_exception=True)
         membership = serializer.save()
         return Response(EnterpriseOrgMemberSerializer(membership).data, status=status.HTTP_201_CREATED)
+
+
+class EnterpriseApiUsageView(APIView):
+    """GET endpoint returning per-org API token usage."""
+
+    permission_classes = [IsAuthenticated, IsEnterprise]
+
+    def get(self, request):
+        now = timezone.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # Per-org usage this month
+        org_usage = (
+            COTAnalysis.objects.filter(
+                created_at__gte=month_start,
+                created_by__membership__isnull=False,
+            )
+            .values(
+                "created_by__membership__organization__id",
+                "created_by__membership__organization__name",
+            )
+            .annotate(
+                analysis_count=Count("id"),
+                total_input_tokens=Sum("input_tokens"),
+                total_output_tokens=Sum("output_tokens"),
+            )
+            .order_by("-total_input_tokens")
+        )
+
+        organizations = []
+        platform_input = 0
+        platform_output = 0
+        platform_analyses = 0
+
+        for row in org_usage:
+            input_t = row["total_input_tokens"] or 0
+            output_t = row["total_output_tokens"] or 0
+            count = row["analysis_count"] or 0
+            organizations.append({
+                "org_id": str(row["created_by__membership__organization__id"]),
+                "org_name": row["created_by__membership__organization__name"],
+                "analysis_count": count,
+                "input_tokens": input_t,
+                "output_tokens": output_t,
+                "total_tokens": input_t + output_t,
+            })
+            platform_input += input_t
+            platform_output += output_t
+            platform_analyses += count
+
+        return Response({
+            "period": month_start.strftime("%Y-%m"),
+            "platform_totals": {
+                "analysis_count": platform_analyses,
+                "input_tokens": platform_input,
+                "output_tokens": platform_output,
+                "total_tokens": platform_input + platform_output,
+            },
+            "organizations": organizations,
+        })
