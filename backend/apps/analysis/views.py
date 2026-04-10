@@ -1,4 +1,9 @@
+import datetime
+import logging
+
 from django.core.files.base import ContentFile
+from django.db.models import Q
+from django.utils import timezone
 from django_q.tasks import async_task
 from rest_framework import status, viewsets
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
@@ -20,6 +25,61 @@ from .serializers import (
     UserSettingsSerializer,
 )
 from .services.ai_providers import list_models
+
+logger = logging.getLogger(__name__)
+
+# Maximum time (seconds) an analysis can stay in "processing" before being auto-failed.
+STALE_ANALYSIS_TIMEOUT = 660  # 11 minutes (slightly above Q_CLUSTER retry of 660s)
+
+
+def is_qcluster_running():
+    """Check if at least one Django-Q2 cluster is alive.
+
+    Uses Stat.get_all() which reads the cluster heartbeat from the ORM broker.
+    Falls back to checking if any tasks have been processed recently.
+    """
+    try:
+        from django_q.status import Stat
+
+        stats = Stat.get_all()
+        if len(stats) > 0:
+            return True
+    except Exception:
+        pass
+
+    # Fallback: check if any task was processed in the last 5 minutes
+    # (covers cases where Stat doesn't detect the cluster but it's working)
+    try:
+        from django_q.models import Success
+
+        cutoff = timezone.now() - datetime.timedelta(minutes=5)
+        if Success.objects.filter(stopped__gte=cutoff).exists():
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+def recover_stale_analyses():
+    """Mark analyses stuck in 'processing' beyond the timeout as failed.
+
+    This is called on every analysis poll so that stuck tasks are cleaned up
+    automatically even if no one is actively monitoring.
+    """
+    cutoff = timezone.now() - datetime.timedelta(seconds=STALE_ANALYSIS_TIMEOUT)
+    stale = COTAnalysis.objects.filter(
+        status=COTAnalysis.Status.PROCESSING,
+        created_at__lt=cutoff,
+    )
+    count = stale.update(
+        status=COTAnalysis.Status.FAILED,
+        progress_step=COTAnalysis.ProgressStep.FAILED,
+        error_message="Analysis timed out — the background worker may not have been running. Please try again.",
+    )
+    if count:
+        logger.warning("Auto-failed %d stale analyses that exceeded %ds timeout.", count, STALE_ANALYSIS_TIMEOUT)
+    return count
 
 
 def resolve_api_config(user):
@@ -185,6 +245,11 @@ class COTAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
             "document", "generated_document"
         )
 
+    def retrieve(self, request, *args, **kwargs):
+        # On every poll for a single analysis, check for stale tasks
+        recover_stale_analyses()
+        return super().retrieve(request, *args, **kwargs)
+
 
 class ListModelsView(APIView):
     """GET endpoint to list available models for a provider."""
@@ -215,6 +280,19 @@ class RunAnalysisView(APIView):
     def post(self, request):
         serializer = RunAnalysisSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        # Pre-flight: ensure the background worker is running
+        if not is_qcluster_running():
+            return Response(
+                {
+                    "detail": (
+                        "The background task worker is not running. "
+                        "Analysis cannot be processed. Please start the worker "
+                        "(python manage.py qcluster) and try again."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         try:
             doc_qs = Document.objects.all()
@@ -310,11 +388,16 @@ class CancelAnalysisView(APIView):
 
 
 class AnalysisDebugView(APIView):
-    """GET endpoint for developer-only debug info on an analysis."""
+    """GET endpoint for admin/developer debug info on an analysis."""
 
     def get(self, request, pk):
-        if not getattr(request.user, "is_developer", False):
-            return Response({"detail": "Developer access required."}, status=status.HTTP_403_FORBIDDEN)
+        user = request.user
+        is_admin = getattr(user, "is_developer", False)
+        if not is_admin:
+            membership = getattr(user, "membership", None)
+            is_admin = membership and membership.role == "admin"
+        if not is_admin:
+            return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             analysis = COTAnalysis.objects.select_related("document", "generated_document").get(id=pk)
@@ -322,3 +405,71 @@ class AnalysisDebugView(APIView):
             return Response({"detail": "Analysis not found."}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(COTAnalysisDebugSerializer(analysis, context={"request": request}).data)
+
+
+class WorkerHealthView(APIView):
+    """GET endpoint to check if the background worker is running."""
+
+    def get(self, request):
+        alive = is_qcluster_running()
+        return Response({
+            "worker_running": alive,
+            "stale_count": COTAnalysis.objects.filter(
+                status=COTAnalysis.Status.PROCESSING,
+                created_at__lt=timezone.now() - datetime.timedelta(seconds=STALE_ANALYSIS_TIMEOUT),
+            ).count(),
+        })
+
+
+class DashboardStatsView(APIView):
+    """GET endpoint returning dashboard statistics for the current user."""
+
+    def get(self, request):
+        user = request.user
+        now = timezone.now()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # Scope documents and analyses to user's org
+        is_dev = getattr(user, "is_developer", False)
+        membership = getattr(user, "membership", None)
+
+        if is_dev:
+            doc_qs = Document.objects.all()
+            analysis_qs = COTAnalysis.objects.all()
+        elif membership:
+            org = membership.organization
+            doc_qs = Document.objects.filter(
+                Q(chain_of_title__project__client__organization=org)
+                | Q(chain_of_title__isnull=True, uploaded_by__membership__organization=org)
+            )
+            analysis_qs = COTAnalysis.objects.filter(created_by__membership__organization=org)
+        else:
+            doc_qs = Document.objects.none()
+            analysis_qs = COTAnalysis.objects.none()
+
+        total_documents = doc_qs.count()
+        analyses_this_month = analysis_qs.filter(created_at__gte=month_start).count()
+        pending_analyses = analysis_qs.filter(status__in=["pending", "processing"]).count()
+
+        # Recent activity: last 10 analyses
+        recent = analysis_qs.select_related("document", "created_by").order_by("-created_at")[:10]
+        activity = []
+        for a in recent:
+            activity.append({
+                "id": str(a.id),
+                "type": "analysis",
+                "status": a.status,
+                "document_name": a.document.original_filename if a.document else None,
+                "created_by_name": (
+                    f"{a.created_by.first_name} {a.created_by.last_name}".strip()
+                    if a.created_by else None
+                ),
+                "created_at": a.created_at.isoformat(),
+            })
+
+        return Response({
+            "total_documents": total_documents,
+            "analyses_this_month": analyses_this_month,
+            "pending_analyses": pending_analyses,
+            "recent_activity": activity,
+        })

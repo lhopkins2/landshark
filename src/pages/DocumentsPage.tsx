@@ -1,7 +1,9 @@
-import { useState, useRef, type DragEvent } from "react";
+import { useState, useRef, useCallback, type DragEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, FileText, Plus, Upload, Pencil, X, Download, FolderOpen, Folder, ChevronLeft, FolderPlus } from "lucide-react";
+import { Search, FileText, Plus, Upload, Pencil, X, Download, FolderOpen, Folder, ChevronLeft, FolderPlus, Archive } from "lucide-react";
+import JSZip from "jszip";
 import { documentsApi, foldersApi } from "../api/documents";
+import DocumentDetailDrawer from "../components/DocumentDetailDrawer";
 import type { Document, DocumentFolder } from "../types/models";
 
 export default function DocumentsPage() {
@@ -14,6 +16,7 @@ export default function DocumentsPage() {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [editingFolder, setEditingFolder] = useState<DocumentFolder | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [detailDoc, setDetailDoc] = useState<Document | null>(null);
   const queryClient = useQueryClient();
 
   const params: Record<string, string> = {};
@@ -111,6 +114,8 @@ export default function DocumentsPage() {
   });
 
   const [isExporting, setIsExporting] = useState(false);
+  const [dragOverPage, setDragOverPage] = useState(false);
+  const dragCounter = useRef(0);
 
   const handleDownload = async (doc: Document) => {
     if (doc.download_url) {
@@ -120,11 +125,73 @@ export default function DocumentsPage() {
 
   const handleBulkExport = async () => {
     setIsExporting(true);
-    const selected = documents.filter((d) => selectedIds.has(d.id));
-    for (const doc of selected) {
-      await handleDownload(doc);
+    try {
+      const selected = documents.filter((d) => selectedIds.has(d.id));
+      const zip = new JSZip();
+      for (const doc of selected) {
+        const res = await documentsApi.downloadBlob(doc.id);
+        zip.file(doc.original_filename, res.data);
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `documents-${selected.length}-files.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsExporting(false);
     }
-    setIsExporting(false);
+  };
+
+  // Upload files dropped from OS
+  const uploadFiles = useCallback(async (files: FileList, folderId: string | null) => {
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append("file", file);
+      if (folderId) formData.append("folder", folderId);
+      await documentsApi.upload(formData);
+    }
+    queryClient.invalidateQueries({ queryKey: ["documents"] });
+    queryClient.invalidateQueries({ queryKey: ["document-folders"] });
+  }, [queryClient]);
+
+  const isFileDrag = (e: DragEvent) => e.dataTransfer.types.includes("Files");
+
+  // Folder drop: handle both document-move and file-upload
+  const handleFolderDropCombined = (e: DragEvent, folderId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverFolderId(null);
+    if (e.dataTransfer.files.length > 0) {
+      uploadFiles(e.dataTransfer.files, folderId);
+    } else {
+      try {
+        const ids = JSON.parse(e.dataTransfer.getData("application/json")) as string[];
+        if (ids.length > 0) moveToFolderMutation.mutate({ docIds: ids, folderId });
+      } catch { /* ignore */ }
+    }
+  };
+
+  // Page-level drop zone for uploading to current folder
+  const handlePageDragEnter = (e: DragEvent) => {
+    e.preventDefault();
+    if (isFileDrag(e)) { dragCounter.current++; setDragOverPage(true); }
+  };
+  const handlePageDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    if (isFileDrag(e)) { dragCounter.current--; if (dragCounter.current <= 0) { dragCounter.current = 0; setDragOverPage(false); } }
+  };
+  const handlePageDragOver = (e: DragEvent) => { e.preventDefault(); if (isFileDrag(e)) e.dataTransfer.dropEffect = "copy"; };
+  const handlePageDrop = (e: DragEvent) => {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDragOverPage(false);
+    if (e.dataTransfer.files.length > 0) {
+      uploadFiles(e.dataTransfer.files, currentFolderId);
+    }
   };
 
   const toggleSelect = (id: string) => {
@@ -146,31 +213,53 @@ export default function DocumentsPage() {
 
   // Drag and drop handlers for moving docs into folders
   const handleDragStart = (e: DragEvent, docId: string) => {
-    // If dragging a selected doc, drag all selected; otherwise just the one
     const ids = selectedIds.has(docId) ? [...selectedIds] : [docId];
     e.dataTransfer.setData("application/json", JSON.stringify(ids));
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const handleFolderDrop = (e: DragEvent, folderId: string | null) => {
-    e.preventDefault();
-    setDragOverFolderId(null);
-    try {
-      const ids = JSON.parse(e.dataTransfer.getData("application/json")) as string[];
-      if (ids.length > 0) {
-        moveToFolderMutation.mutate({ docIds: ids, folderId });
-      }
-    } catch { /* ignore invalid data */ }
-  };
-
   const handleFolderDragOver = (e: DragEvent, folderId: string) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
+    e.dataTransfer.dropEffect = isFileDrag(e) ? "copy" : "move";
     setDragOverFolderId(folderId);
   };
 
   return (
-    <div>
+    <div
+      onDragEnter={handlePageDragEnter}
+      onDragLeave={handlePageDragLeave}
+      onDragOver={handlePageDragOver}
+      onDrop={handlePageDrop}
+      style={{ position: "relative" }}
+    >
+      {/* Page-level drop overlay */}
+      {dragOverPage && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 50,
+          backgroundColor: "rgba(139,105,20,0.06)",
+          border: "3px dashed var(--ls-primary)",
+          borderRadius: "var(--ls-radius-lg)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          pointerEvents: "none",
+        }}>
+          <div style={{
+            padding: "var(--ls-space-xl) var(--ls-space-2xl)",
+            backgroundColor: "var(--ls-surface)",
+            borderRadius: "var(--ls-radius-lg)",
+            boxShadow: "var(--ls-shadow-lg, 0 8px 24px rgba(0,0,0,0.12))",
+            textAlign: "center",
+          }}>
+            <Upload size={32} style={{ color: "var(--ls-primary)", marginBottom: "var(--ls-space-sm)" }} />
+            <p style={{ fontWeight: 600, fontSize: "var(--ls-text-lg)" }}>
+              Drop files to upload
+            </p>
+            <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)", marginTop: 4 }}>
+              {currentFolder ? `Into "${currentFolder.name}"` : "To Documents"}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--ls-space-lg)" }}>
         <div>
           <h2 style={{ fontSize: "var(--ls-text-2xl)", fontWeight: 700 }}>Documents</h2>
@@ -180,12 +269,14 @@ export default function DocumentsPage() {
         </div>
         <div style={{ display: "flex", gap: "var(--ls-space-sm)" }}>
           <button
+            className="doc-btn"
             onClick={() => setShowNewFolder(true)}
             style={{
               display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
               padding: "10px 16px", borderRadius: "var(--ls-radius-md)",
               backgroundColor: "var(--ls-surface)", color: "var(--ls-text-secondary)",
               fontWeight: 600, fontSize: "var(--ls-text-sm)", border: "1px solid var(--ls-border)", cursor: "pointer",
+              transition: "background-color 0.15s, color 0.15s",
             }}
           >
             <FolderPlus size={16} /> New Folder
@@ -351,7 +442,7 @@ export default function DocumentsPage() {
               opacity: isExporting ? 0.7 : 1,
             }}
           >
-            <Download size={13} /> {isExporting ? "Exporting..." : "Export Selected"}
+            <Archive size={13} /> {isExporting ? "Zipping..." : "Download as Zip"}
           </button>
           {/* Move to folder dropdown */}
           <MoveToFolderButton
@@ -393,8 +484,9 @@ export default function DocumentsPage() {
           initialName={editingDoc.original_filename}
           initialTract={editingDoc.tract_number || ""}
           initialHolder={editingDoc.last_record_holder || ""}
+          initialNotes={editingDoc.description || ""}
           isPending={editMutation.isPending}
-          onSave={(name, tract, holder) => editMutation.mutate({ id: editingDoc.id, data: { original_filename: name, tract_number: tract, last_record_holder: holder } })}
+          onSave={(name, tract, holder, notes) => editMutation.mutate({ id: editingDoc.id, data: { original_filename: name, tract_number: tract, last_record_holder: holder, description: notes } })}
           onClose={() => setEditingDoc(null)}
         />
       )}
@@ -407,11 +499,12 @@ export default function DocumentsPage() {
           initialHolder=""
           isPending={bulkEditMutation.isPending}
           isBulk
-          onSave={(name, tract, holder) => {
+          onSave={(name, tract, holder, notes) => {
             const data: Record<string, string> = {};
             if (name) data.original_filename = name;
             if (tract) data.tract_number = tract;
             if (holder) data.last_record_holder = holder;
+            if (notes) data.description = notes;
             if (Object.keys(data).length > 0) bulkEditMutation.mutate(data);
           }}
           onClose={() => setShowBulkEdit(false)}
@@ -427,9 +520,10 @@ export default function DocumentsPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "var(--ls-space-sm)" }}>
             {folders.map((folder) => (
               <div
+                className="doc-folder"
                 key={folder.id}
                 onClick={() => { setCurrentFolderId(folder.id); setSelectedIds(new Set()); }}
-                onDrop={(e) => handleFolderDrop(e, folder.id)}
+                onDrop={(e) => handleFolderDropCombined(e, folder.id)}
                 onDragOver={(e) => handleFolderDragOver(e, folder.id)}
                 onDragLeave={() => setDragOverFolderId(null)}
                 style={{
@@ -460,7 +554,7 @@ export default function DocumentsPage() {
       {/* Unfiled documents label */}
       {!currentFolderId && folders.length > 0 && !search && (
         <div
-          onDrop={(e) => handleFolderDrop(e, null)}
+          onDrop={(e) => handleFolderDropCombined(e, null)}
           onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
           style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--ls-space-sm)" }}
         >
@@ -493,12 +587,21 @@ export default function DocumentsPage() {
               document={doc}
               selected={selectedIds.has(doc.id)}
               onToggle={() => toggleSelect(doc.id)}
+              onClick={() => setDetailDoc(doc)}
               onEdit={() => setEditingDoc(doc)}
               onDownload={() => handleDownload(doc)}
               onDragStart={(e) => handleDragStart(e, doc.id)}
             />
           ))}
         </div>
+      )}
+
+      {/* Document Detail Drawer */}
+      {detailDoc && (
+        <DocumentDetailDrawer
+          document={detailDoc}
+          onClose={() => setDetailDoc(null)}
+        />
       )}
     </div>
   );
@@ -681,6 +784,8 @@ function UploadForm({ folders, currentFolderId, onClose, onUploaded }: { folders
 
       <div
         onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; }}
+        onDrop={(e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]); }}
         style={{
           border: "2px dashed var(--ls-border)",
           borderRadius: "var(--ls-radius-md)",
@@ -701,7 +806,7 @@ function UploadForm({ folders, currentFolderId, onClose, onUploaded }: { folders
         {file ? (
           <p style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500 }}>{file.name} ({formatFileSize(file.size)})</p>
         ) : (
-          <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)" }}>Click to select a file</p>
+          <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)" }}>Click or drag a file here</p>
         )}
       </div>
 
@@ -727,7 +832,7 @@ function UploadForm({ folders, currentFolderId, onClose, onUploaded }: { folders
             ))}
           </select>
         </div>
-        <FormField label="Description (optional)" value={description} onChange={setDescription} placeholder="Brief description..." />
+        <FormField label="Notes (optional)" value={description} onChange={setDescription} placeholder="Add notes..." />
       </div>
 
       <div style={{ display: "flex", gap: "var(--ls-space-sm)", marginTop: "var(--ls-space-md)" }}>
@@ -755,27 +860,31 @@ function UploadForm({ folders, currentFolderId, onClose, onUploaded }: { folders
   );
 }
 
-function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload, onDragStart }: {
-  document: Document; selected: boolean; onToggle: () => void; onEdit: () => void; onDownload: () => void;
+function DocumentCard({ document: doc, selected, onToggle, onClick, onEdit, onDownload, onDragStart }: {
+  document: Document; selected: boolean; onToggle: () => void; onClick: () => void; onEdit: () => void; onDownload: () => void;
   onDragStart: (e: DragEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div
+      className="doc-card"
       draggable
       onDragStart={onDragStart}
+      onClick={onClick}
       style={{
         display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
         padding: "var(--ls-space-md) var(--ls-space-lg)",
         backgroundColor: "var(--ls-surface)",
         border: selected ? "1px solid var(--ls-primary)" : "1px solid var(--ls-border)",
         borderRadius: "var(--ls-radius-lg)",
-        cursor: "grab",
+        cursor: "pointer",
+        transition: "background-color 0.15s, border-color 0.15s",
       }}
     >
       <input
         type="checkbox"
         checked={selected}
         onChange={onToggle}
+        onClick={(e) => e.stopPropagation()}
         style={{ width: 12, height: 12, cursor: "pointer", flexShrink: 0, accentColor: "var(--ls-text-muted)", opacity: 0.6, marginLeft: -8 }}
       />
       <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)", flex: 1, minWidth: 0 }}>
@@ -784,7 +893,7 @@ function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload, o
           <div style={{ fontWeight: 600, fontSize: "var(--ls-text-base)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {doc.original_filename}
           </div>
-          {doc.description && doc.description.startsWith("Processed from") && (
+          {doc.description && (
             <span style={{
               display: "inline-block",
               fontSize: "var(--ls-text-xs, 11px)",
@@ -794,6 +903,10 @@ function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload, o
               borderRadius: "var(--ls-radius-full, 999px)",
               fontWeight: 500,
               marginTop: 2,
+              maxWidth: 250,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             }}>
               {doc.description}
             </span>
@@ -809,6 +922,7 @@ function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload, o
       <div style={{ display: "flex", gap: "var(--ls-space-xs)", flexShrink: 0 }}>
         {doc.download_url && (
           <button
+            className="doc-btn"
             onClick={(e) => { e.stopPropagation(); onDownload(); }}
             title="Download document"
             style={{
@@ -816,12 +930,14 @@ function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload, o
               width: 32, height: 32, borderRadius: "var(--ls-radius-md)",
               border: "1px solid var(--ls-border)", backgroundColor: "transparent",
               color: "var(--ls-text-muted)", cursor: "pointer",
+              transition: "background-color 0.15s, color 0.15s",
             }}
           >
             <Download size={14} />
           </button>
         )}
         <button
+          className="doc-btn"
           onClick={(e) => { e.stopPropagation(); onEdit(); }}
           title="Edit tract number & last record holder"
           style={{
@@ -829,6 +945,7 @@ function DocumentCard({ document: doc, selected, onToggle, onEdit, onDownload, o
             width: 32, height: 32, borderRadius: "var(--ls-radius-md)",
             border: "1px solid var(--ls-border)", backgroundColor: "transparent",
             color: "var(--ls-text-muted)", cursor: "pointer",
+            transition: "background-color 0.15s, color 0.15s",
           }}
         >
           <Pencil size={14} />
@@ -857,6 +974,7 @@ function DocMetadataModal({
   initialName,
   initialTract,
   initialHolder,
+  initialNotes,
   isPending,
   isBulk,
   onSave,
@@ -866,14 +984,16 @@ function DocMetadataModal({
   initialName?: string;
   initialTract: string;
   initialHolder: string;
+  initialNotes?: string;
   isPending: boolean;
   isBulk?: boolean;
-  onSave: (name: string, tract: string, holder: string) => void;
+  onSave: (name: string, tract: string, holder: string, notes: string) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState(initialName || "");
   const [tract, setTract] = useState(initialTract);
   const [holder, setHolder] = useState(initialHolder);
+  const [notes, setNotes] = useState(initialNotes || "");
 
   return (
     <div
@@ -906,10 +1026,20 @@ function DocMetadataModal({
           <FormField label="Document Name" value={name} onChange={setName} placeholder="e.g. Unprocessed COT.pdf" />
           <FormField label="Tract Number" value={tract} onChange={setTract} placeholder="e.g. 12345" />
           <FormField label="Last Record Holder" value={holder} onChange={setHolder} placeholder="e.g. John Smith" />
+          <div>
+            <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>Notes</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add notes about this document..."
+              rows={3}
+              style={{ width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)", border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)", fontSize: "var(--ls-text-sm)", outline: "none", resize: "vertical", fontFamily: "inherit" }}
+            />
+          </div>
         </div>
         <div style={{ display: "flex", gap: "var(--ls-space-sm)", marginTop: "var(--ls-space-lg)" }}>
           <button
-            onClick={() => onSave(name, tract, holder)}
+            onClick={() => onSave(name, tract, holder, notes)}
             disabled={isPending}
             style={{
               padding: "8px 20px", borderRadius: "var(--ls-radius-md)",

@@ -84,7 +84,9 @@ class OrgMemberListCreateView(APIView):
         org = self._get_org(request.user)
         if not org:
             return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
-        serializer = CreateMemberSerializer(data=request.data, context={"organization": org})
+        serializer = CreateMemberSerializer(
+            data=request.data, context={"organization": org, "request_user": request.user}
+        )
         serializer.is_valid(raise_exception=True)
         membership = serializer.save()
         return Response(MemberSerializer(membership).data, status=status.HTTP_201_CREATED)

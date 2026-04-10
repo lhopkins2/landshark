@@ -180,6 +180,7 @@ export interface OrgMember {
   role: UserRole;
   has_api_key_access: boolean;
   is_active: boolean;
+  is_developer: boolean;
   created_at: string;
 }
 

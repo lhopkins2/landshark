@@ -35,6 +35,7 @@ export default function ChainOfTitlePage() {
   // Progress tracking
   const [pollingAnalysisId, setPollingAnalysisId] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [workerError, setWorkerError] = useState<string | null>(null);
 
   // Queries
   const docParams: Record<string, string> = {};
@@ -131,9 +132,13 @@ export default function ChainOfTitlePage() {
       setCurrentResult(null);
     },
     onError: (err: unknown) => {
-      const axiosErr = err as { response?: { data?: COTAnalysis } };
+      const axiosErr = err as { response?: { data?: { id?: string; detail?: string } } };
       if (axiosErr?.response?.data?.id) {
-        setCurrentResult(axiosErr.response.data);
+        setCurrentResult(axiosErr.response.data as COTAnalysis);
+      }
+      // Surface 503 worker-down error clearly
+      if (axiosErr?.response?.data?.detail) {
+        setWorkerError(axiosErr.response.data.detail);
       }
     },
   });
@@ -539,6 +544,52 @@ export default function ChainOfTitlePage() {
             >
               <XCircle size={12} />
               {cancelMutation.isPending ? "Cancelling..." : "Cancel"}
+            </button>
+          </div>
+        )}
+        {/* Stuck on queued warning — worker likely not running */}
+        {isAnalyzing && polledAnalysis?.progress_step === "queued" && elapsedSeconds > 30 && (
+          <div style={{
+            display: "flex", alignItems: "flex-start", gap: "var(--ls-space-sm)",
+            padding: "var(--ls-space-sm) var(--ls-space-md)", marginTop: "var(--ls-space-sm)",
+            borderRadius: "var(--ls-radius-md)",
+            backgroundColor: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.3)",
+            color: "var(--ls-text)", fontSize: "var(--ls-text-sm)",
+          }}>
+            <AlertTriangle size={16} style={{ color: "#eab308", flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <strong style={{ color: "#eab308" }}>Task stuck in queue</strong>
+              <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 2 }}>
+                The background worker may not be running. Start it with{" "}
+                <code style={{ backgroundColor: "var(--ls-surface-2)", padding: "1px 4px", borderRadius: 3 }}>
+                  python manage.py qcluster
+                </code>{" "}
+                and the task will be picked up automatically.
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Worker error from 503 */}
+        {workerError && (
+          <div style={{
+            display: "flex", alignItems: "flex-start", gap: "var(--ls-space-sm)",
+            padding: "var(--ls-space-sm) var(--ls-space-md)", marginTop: "var(--ls-space-sm)",
+            borderRadius: "var(--ls-radius-md)",
+            backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)",
+            color: "var(--ls-text)", fontSize: "var(--ls-text-sm)",
+          }}>
+            <AlertTriangle size={16} style={{ color: "#ef4444", flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flex: 1 }}>
+              <strong style={{ color: "#ef4444" }}>Worker not running</strong>
+              <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 2 }}>
+                {workerError}
+              </div>
+            </div>
+            <button
+              onClick={() => setWorkerError(null)}
+              style={{ background: "none", border: "none", color: "var(--ls-text-muted)", cursor: "pointer", padding: 2 }}
+            >
+              <X size={14} />
             </button>
           </div>
         )}

@@ -46,3 +46,6 @@ export const selectHasApiKeyAccess = (s: AuthState) =>
 
 export const selectCanManageUsers = (s: AuthState) =>
   s.user?.is_developer || s.user?.role === "admin";
+
+export const selectIsDeveloper = (s: AuthState) =>
+  s.user?.is_developer === true;

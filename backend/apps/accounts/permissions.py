@@ -32,6 +32,13 @@ class IsOrgMember(BasePermission):
         return _get_active_membership(request.user) is not None
 
 
+class IsEnterprise(BasePermission):
+    """Allows access only to users with is_developer=True."""
+
+    def has_permission(self, request, view):
+        return getattr(request.user, "is_developer", False)
+
+
 class HasApiKeyAccess(BasePermission):
     """Allows access if user is admin, developer, or operator with has_api_key_access (in active org)."""
 

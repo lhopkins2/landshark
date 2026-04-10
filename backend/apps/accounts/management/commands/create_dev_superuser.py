@@ -17,5 +17,6 @@ class Command(BaseCommand):
             first_name="Admin",
             last_name="User",
             is_verified=True,
+            is_developer=True,
         )
         self.stdout.write(self.style.SUCCESS(f"Created superuser {email}"))

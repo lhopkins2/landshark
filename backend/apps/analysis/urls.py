@@ -14,4 +14,6 @@ urlpatterns = [
     path("analysis/cancel/<uuid:pk>/", views.CancelAnalysisView.as_view(), name="cancel-analysis"),
     path("analysis/debug/<uuid:pk>/", views.AnalysisDebugView.as_view(), name="analysis-debug"),
     path("analysis/org-settings/", views.OrgSettingsView.as_view(), name="org-analysis-settings"),
+    path("dashboard/stats/", views.DashboardStatsView.as_view(), name="dashboard-stats"),
+    path("analysis/worker-health/", views.WorkerHealthView.as_view(), name="worker-health"),
 ] + router.urls

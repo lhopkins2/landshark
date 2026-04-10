@@ -59,4 +59,24 @@ export const analysesApi = {
     apiClient.post<COTAnalysis>(`/analysis/cancel/${id}/`),
   debug: (id: string) =>
     apiClient.get<COTAnalysisDebug>(`/analysis/debug/${id}/`),
+  workerHealth: () =>
+    apiClient.get<{ worker_running: boolean; stale_count: number }>("/analysis/worker-health/"),
+};
+
+export interface DashboardStats {
+  total_documents: number;
+  analyses_this_month: number;
+  pending_analyses: number;
+  recent_activity: {
+    id: string;
+    type: string;
+    status: string;
+    document_name: string | null;
+    created_by_name: string | null;
+    created_at: string;
+  }[];
+}
+
+export const dashboardApi = {
+  stats: () => apiClient.get<DashboardStats>("/dashboard/stats/"),
 };

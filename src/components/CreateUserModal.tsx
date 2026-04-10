@@ -11,17 +11,20 @@ interface CreateUserModalProps {
     password: string;
     role: UserRole;
     has_api_key_access: boolean;
+    is_developer?: boolean;
   }) => void;
   isSubmitting: boolean;
   error: string | null;
+  isDeveloper?: boolean;
 }
 
-export default function CreateUserModal({ onClose, onSubmit, isSubmitting, error }: CreateUserModalProps) {
+export default function CreateUserModal({ onClose, onSubmit, isSubmitting, error, isDeveloper }: CreateUserModalProps) {
   const [email, setEmail] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole>("operator");
+  const [makeDeveloper, setMakeDeveloper] = useState(false);
   const [hasApiKeyAccess, setHasApiKeyAccess] = useState(false);
 
   function handleSubmit(e: React.FormEvent) {
@@ -31,8 +34,9 @@ export default function CreateUserModal({ onClose, onSubmit, isSubmitting, error
       first_name: firstName,
       last_name: lastName,
       password,
-      role,
-      has_api_key_access: role === "admin" ? true : hasApiKeyAccess,
+      role: makeDeveloper ? "admin" : role,
+      has_api_key_access: makeDeveloper || role === "admin" ? true : hasApiKeyAccess,
+      is_developer: makeDeveloper || undefined,
     });
   }
 
@@ -136,23 +140,38 @@ export default function CreateUserModal({ onClose, onSubmit, isSubmitting, error
             />
           </div>
 
-          <div>
-            <label style={{ display: "block", fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)", marginBottom: 4 }}>
-              Role
+          {isDeveloper && (
+            <label style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={makeDeveloper}
+                onChange={(e) => setMakeDeveloper(e.target.checked)}
+              />
+              <span style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)" }}>
+                Developer account
+              </span>
             </label>
-            <div className="ls-select-wrapper">
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as UserRole)}
-                className="ls-select"
-              >
-                <option value="operator">Operator</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
-          </div>
+          )}
 
-          {role === "operator" && (
+          {!makeDeveloper && (
+            <div>
+              <label style={{ display: "block", fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)", marginBottom: 4 }}>
+                Role
+              </label>
+              <div className="ls-select-wrapper">
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as UserRole)}
+                  className="ls-select"
+                >
+                  <option value="operator">Operator</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {!makeDeveloper && role === "operator" && (
             <label style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)", cursor: "pointer" }}>
               <input
                 type="checkbox"

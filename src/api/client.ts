@@ -54,7 +54,8 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest);
       } catch {
         useAuthStore.getState().logout();
-        window.location.href = "/login";
+        const isEnterprise = window.location.pathname.startsWith("/enterprise");
+        window.location.href = isEnterprise ? "/enterprise/login" : "/login";
       } finally {
         refreshPromise = null;
       }

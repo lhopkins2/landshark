@@ -1,36 +1,14 @@
 import { NavLink } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Link2,
-  FileText,
-  Settings,
-  Users,
-  Bug,
-  PanelLeftClose,
-  PanelLeftOpen,
-} from "lucide-react";
-import { useAuthStore, selectIsAdmin, selectCanManageUsers } from "../../stores/authStore";
+import { LayoutDashboard, Building2, ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useSidebarStore } from "../../stores/sidebarStore";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/chain-of-title", icon: Link2, label: "Chain of Title" },
-  { to: "/documents", icon: FileText, label: "Documents" },
-  { to: "/settings", icon: Settings, label: "Settings" },
+  { to: "/enterprise", icon: LayoutDashboard, label: "Dashboard" },
+  { to: "/enterprise/organizations", icon: Building2, label: "Organizations" },
 ];
 
-const adminNavItems = [
-  { to: "/users", icon: Users, label: "Users" },
-];
-
-const devNavItems = [
-  { to: "/troubleshooting", icon: Bug, label: "Troubleshooting" },
-];
-
-export default function Sidebar() {
+export default function EnterpriseSidebar() {
   const { collapsed, toggleCollapsed } = useSidebarStore();
-  const isAdmin = useAuthStore(selectIsAdmin);
-  const canManageUsers = useAuthStore(selectCanManageUsers);
 
   const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties => ({
     display: "flex",
@@ -49,19 +27,6 @@ export default function Sidebar() {
     whiteSpace: "nowrap",
     overflow: "hidden",
   });
-
-  const dividerStyle: React.CSSProperties = {
-    height: 1, backgroundColor: "var(--ls-border)",
-    margin: "var(--ls-space-sm) var(--ls-space-md)",
-  };
-
-  const renderNavItems = (items: typeof navItems, useEnd = false) =>
-    items.map(({ to, icon: Icon, label }) => (
-      <NavLink key={to} to={to} end={useEnd && to === "/"} title={collapsed ? label : undefined} style={navLinkStyle}>
-        <Icon size={18} style={{ flexShrink: 0 }} />
-        {!collapsed && label}
-      </NavLink>
-    ));
 
   return (
     <aside
@@ -91,7 +56,7 @@ export default function Sidebar() {
       >
         <img
           src="/landshark-icon.png"
-          alt="LandShark Group"
+          alt="LandShark Enterprise"
           style={{ width: 40, height: 40, objectFit: "contain", flexShrink: 0 }}
         />
         {!collapsed && (
@@ -104,7 +69,7 @@ export default function Sidebar() {
                 letterSpacing: "-0.02em",
               }}
             >
-              LandShark Group
+              Enterprise
             </h1>
             <p
               style={{
@@ -113,7 +78,7 @@ export default function Sidebar() {
                 marginTop: "2px",
               }}
             >
-              Document Management
+              Platform Management
             </p>
           </div>
         )}
@@ -121,21 +86,19 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav style={{ flex: 1 }}>
-        {renderNavItems(navItems, true)}
+        {navItems.map(({ to, icon: Icon, label }) => (
+          <NavLink key={to} to={to} end={to === "/enterprise"} title={collapsed ? label : undefined} style={navLinkStyle}>
+            <Icon size={18} style={{ flexShrink: 0 }} />
+            {!collapsed && label}
+          </NavLink>
+        ))}
 
-        {canManageUsers && (
-          <>
-            <div style={dividerStyle} />
-            {renderNavItems(adminNavItems)}
-          </>
-        )}
+        <div style={{ height: 1, backgroundColor: "var(--ls-border)", margin: "var(--ls-space-sm) var(--ls-space-md)" }} />
 
-        {isAdmin && (
-          <>
-            <div style={dividerStyle} />
-            {renderNavItems(devNavItems)}
-          </>
-        )}
+        <NavLink to="/" title={collapsed ? "Back to App" : undefined} style={() => navLinkStyle({ isActive: false })}>
+          <ArrowLeft size={18} style={{ flexShrink: 0 }} />
+          {!collapsed && "Back to App"}
+        </NavLink>
       </nav>
 
       {/* Collapse toggle */}
@@ -147,9 +110,7 @@ export default function Sidebar() {
           alignItems: "center",
           justifyContent: collapsed ? "center" : "flex-start",
           gap: "var(--ls-space-sm)",
-          padding: collapsed
-            ? "var(--ls-space-sm)"
-            : "var(--ls-space-sm) var(--ls-space-lg)",
+          padding: collapsed ? "var(--ls-space-sm)" : "var(--ls-space-sm) var(--ls-space-lg)",
           margin: "var(--ls-space-sm)",
           borderRadius: "var(--ls-radius-md)",
           fontSize: "var(--ls-text-sm)",

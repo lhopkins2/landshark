@@ -1,14 +1,11 @@
 import { Outlet } from "react-router-dom";
-import Sidebar from "./Sidebar";
+import EnterpriseSidebar from "./EnterpriseSidebar";
 import Header from "./Header";
-import ToastContainer, { useAnalysisNotifications } from "../ToastContainer";
 
-export default function AppLayout() {
-  useAnalysisNotifications();
-
+export default function EnterpriseLayout() {
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
-      <Sidebar />
+      <EnterpriseSidebar />
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         <Header />
         <main
@@ -22,7 +19,6 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
-      <ToastContainer />
     </div>
   );
 }

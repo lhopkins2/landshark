@@ -79,6 +79,7 @@ class MemberSerializer(serializers.Serializer):
     role = serializers.CharField()
     has_api_key_access = serializers.BooleanField()
     is_active = serializers.BooleanField(source="user.is_active")
+    is_developer = serializers.BooleanField(source="user.is_developer")
     created_at = serializers.DateTimeField()
 
 
@@ -89,15 +90,25 @@ class CreateMemberSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=8)
     role = serializers.ChoiceField(choices=Membership.Role.choices)
     has_api_key_access = serializers.BooleanField(default=False)
+    is_developer = serializers.BooleanField(default=False, required=False)
 
     def validate_email(self, value):
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return value
 
+    def validate_is_developer(self, value):
+        if value and not getattr(self.context.get("request_user"), "is_developer", False):
+            raise serializers.ValidationError("Only developers can create developer accounts.")
+        return value
+
     def validate(self, attrs):
         # Admins always have API key access
         if attrs["role"] == "admin":
+            attrs["has_api_key_access"] = True
+        # Developers always get admin role and API access
+        if attrs.get("is_developer"):
+            attrs["role"] = "admin"
             attrs["has_api_key_access"] = True
         return attrs
 
@@ -110,6 +121,7 @@ class CreateMemberSerializer(serializers.Serializer):
             first_name=validated_data.get("first_name", ""),
             last_name=validated_data.get("last_name", ""),
             is_verified=True,
+            is_developer=validated_data.get("is_developer", False),
         )
         membership = Membership.objects.create(
             user=user,

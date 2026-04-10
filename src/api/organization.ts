@@ -15,6 +15,7 @@ export const orgApi = {
     password: string;
     role: string;
     has_api_key_access: boolean;
+    is_developer?: boolean;
   }) =>
     apiClient.post<OrgMember>("/auth/org/members/", data),
 

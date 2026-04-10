@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, FileText, Type, Loader } from "lucide-react";
+import { ArrowLeft, FileText, Type, Loader, Search, X } from "lucide-react";
+import DOMPurify from "dompurify";
 import { analysesApi } from "../api/analysis";
 import { documentsApi } from "../api/documents";
 import DocumentViewer from "../components/DocumentViewer";
@@ -16,6 +17,7 @@ export default function ReviewPage() {
   const [rightMode, setRightMode] = useState<"document" | "text">("document");
   const [selectedRowIdx, setSelectedRowIdx] = useState<number | null>(null);
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
 
   const { data: analysis, isLoading: analysisLoading } = useQuery({
     queryKey: ["analysis", analysisId],
@@ -54,6 +56,28 @@ export default function ReviewPage() {
       return norm === "docpg" || norm === "page" || norm === "pages" || norm === "pg";
     });
   }, [parsed]);
+
+  // Search: find matching row indices
+  const matchingIndices = useMemo(() => {
+    if (!parsed || !searchTerm.trim()) return null;
+    const term = searchTerm.toLowerCase();
+    const indices = new Set<number>();
+    parsed.rows.forEach((row, idx) => {
+      if (row.some((cell) => cell.toLowerCase().includes(term))) {
+        indices.add(idx);
+      }
+    });
+    return indices;
+  }, [parsed, searchTerm]);
+
+  // Highlight a search term within a cell string, returning sanitized HTML
+  function highlightCell(text: string): string {
+    if (!searchTerm.trim()) return "";
+    const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(${escaped})`, "gi");
+    const html = text.replace(re, '<mark class="ls-highlight">$1</mark>');
+    return DOMPurify.sanitize(html);
+  }
 
   function handleRowClick(idx: number) {
     if (selectedRowIdx === idx) {
@@ -143,6 +167,29 @@ export default function ReviewPage() {
               )}
             </div>
           </div>
+          {/* Search bar */}
+          {leftMode === "text" && parsed && parsed.headers.length > 0 && (
+            <div className="review-search-bar">
+              <Search size={14} style={{ color: "var(--ls-text-muted)", flexShrink: 0 }} />
+              <input
+                type="text"
+                placeholder="Search results..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="review-search-input"
+              />
+              {matchingIndices && (
+                <span className="review-search-count">
+                  {matchingIndices.size} of {parsed.rows.length}
+                </span>
+              )}
+              {searchTerm && (
+                <button onClick={() => setSearchTerm("")} className="review-search-clear">
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          )}
           <div className="review-panel-body">
             {leftMode === "text" && parsed ? (
               <div className="review-table-wrapper">
@@ -168,17 +215,34 @@ export default function ReviewPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {parsed.rows.map((row, idx) => (
-                        <tr
-                          key={idx}
-                          className={selectedRowIdx === idx ? "selected" : ""}
-                          onClick={() => handleRowClick(idx)}
-                        >
-                          {row.map((cell, ci) => (
-                            <td key={ci} className={ci === docPgColIdx ? "col-pg" : undefined}>{cell}</td>
-                          ))}
-                        </tr>
-                      ))}
+                      {parsed.rows.map((row, idx) => {
+                        const isMatch = !matchingIndices || matchingIndices.has(idx);
+                        const isDimmed = matchingIndices && !isMatch;
+                        return (
+                          <tr
+                            key={idx}
+                            className={`${selectedRowIdx === idx ? "selected" : ""} ${isDimmed ? "search-dimmed" : ""}`}
+                            onClick={() => handleRowClick(idx)}
+                          >
+                            {row.map((cell, ci) => {
+                              // Highlight matching cells — HTML is sanitized via DOMPurify in highlightCell()
+                              if (isMatch && searchTerm.trim()) {
+                                const sanitizedHtml = highlightCell(cell);
+                                return (
+                                  <td
+                                    key={ci}
+                                    className={ci === docPgColIdx ? "col-pg" : undefined}
+                                    dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+                                  />
+                                );
+                              }
+                              return (
+                                <td key={ci} className={ci === docPgColIdx ? "col-pg" : undefined}>{cell}</td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}

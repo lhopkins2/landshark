@@ -60,14 +60,16 @@ export default function Header() {
 
       {/* User info */}
       {user && (
-        <span
-          style={{
-            fontSize: "var(--ls-text-sm)",
-            color: "var(--ls-text-secondary)",
-          }}
-        >
-          {user.first_name} {user.last_name}
-        </span>
+        <div style={{ textAlign: "right", lineHeight: 1.3 }}>
+          <div style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)" }}>
+            {user.first_name} {user.last_name}
+          </div>
+          {user.organization_name && (
+            <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
+              {user.organization_name}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Logout */}

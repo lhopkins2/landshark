@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { UserPlus, Shield, User, KeyRound, Loader } from "lucide-react";
+import { UserPlus, Shield, User, KeyRound, Loader, Code } from "lucide-react";
 import { orgApi } from "../api/organization";
 import CreateUserModal from "../components/CreateUserModal";
 import type { OrgMember, UserRole } from "../types/models";
@@ -168,11 +168,11 @@ export default function UserManagementPage() {
                           borderRadius: "var(--ls-radius-sm)",
                           fontSize: "var(--ls-text-xs)",
                           fontWeight: 500,
-                          backgroundColor: member.role === "admin" ? "var(--ls-primary-bg)" : "var(--ls-surface-2)",
-                          color: member.role === "admin" ? "var(--ls-primary)" : "var(--ls-text-secondary)",
+                          backgroundColor: member.is_developer ? "var(--ls-info-bg)" : member.role === "admin" ? "var(--ls-primary-bg)" : "var(--ls-surface-2)",
+                          color: member.is_developer ? "var(--ls-info)" : member.role === "admin" ? "var(--ls-primary)" : "var(--ls-text-secondary)",
                         }}>
-                          {member.role === "admin" ? <Shield size={12} /> : <User size={12} />}
-                          {member.role === "admin" ? "Admin" : "Operator"}
+                          {member.is_developer ? <Code size={12} /> : member.role === "admin" ? <Shield size={12} /> : <User size={12} />}
+                          {member.is_developer ? "Developer" : member.role === "admin" ? "Admin" : "Operator"}
                         </span>
                       )}
                     </td>
@@ -252,6 +252,7 @@ export default function UserManagementPage() {
           onSubmit={(data) => createMutation.mutate(data)}
           isSubmitting={createMutation.isPending}
           error={createError}
+          isDeveloper={currentUser?.is_developer}
         />
       )}
     </div>
