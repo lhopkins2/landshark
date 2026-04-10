@@ -197,12 +197,21 @@ export default function ChainOfTitlePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analyses]);
 
-  // Elapsed timer
+  // Elapsed timer — derive from server created_at so it survives page refresh
   useEffect(() => {
     if (!isAnalyzing) return;
-    const interval = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    function tick() {
+      if (polledAnalysis?.created_at) {
+        const started = new Date(polledAnalysis.created_at).getTime();
+        setElapsedSeconds(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+      } else {
+        setElapsedSeconds((s) => s + 1);
+      }
+    }
+    tick(); // set immediately so we don't wait 1s on resume
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [isAnalyzing]);
+  }, [isAnalyzing, polledAnalysis?.created_at]);
 
   const canAnalyze = selectedDocId && hasApiKey && !analyzeMutation.isPending && !isAnalyzing;
 

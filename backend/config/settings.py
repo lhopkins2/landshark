@@ -167,6 +167,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
@@ -178,11 +181,12 @@ STORAGES = {
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-if not DEBUG:
+_spaces_key = config("DO_SPACES_KEY", default="")
+if not DEBUG and _spaces_key:
     STORAGES["default"] = {
         "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
     }
-    AWS_ACCESS_KEY_ID = config("DO_SPACES_KEY", default="")
+    AWS_ACCESS_KEY_ID = _spaces_key
     AWS_SECRET_ACCESS_KEY = config("DO_SPACES_SECRET", default="")
     AWS_STORAGE_BUCKET_NAME = config("DO_SPACES_BUCKET", default="")
     AWS_S3_ENDPOINT_URL = config("DO_SPACES_ENDPOINT", default="")

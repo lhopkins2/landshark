@@ -13,6 +13,12 @@
       "runtimeArgs": ["manage.py", "runserver", "8001"],
       "cwd": "backend",
       "port": 8001
+    },
+    {
+      "name": "worker",
+      "runtimeExecutable": "/Users/liamhopkins/Documents/Title Apps/landshark-group/backend/.venv/bin/python",
+      "runtimeArgs": ["manage.py", "qcluster"],
+      "cwd": "backend"
     }
   ]
 }

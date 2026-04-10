@@ -663,7 +663,11 @@ function UploadForm({ folders, currentFolderId, onClose, onUploaded }: { folders
       return documentsApi.upload(formData);
     },
     onSuccess: () => onUploaded(),
-    onError: () => setError("Failed to upload document."),
+    onError: (err: unknown) => {
+      const axiosErr = err as { response?: { data?: Record<string, unknown> } };
+      const detail = axiosErr?.response?.data?.detail || axiosErr?.response?.data?.file;
+      setError(detail ? String(detail) : "Failed to upload document.");
+    },
   });
 
   return (
