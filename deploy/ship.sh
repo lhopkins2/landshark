@@ -9,7 +9,7 @@ set -euo pipefail
 
 SERVER="root@45.55.48.26"
 SSH_KEY="~/.ssh/lshark"
-DEPLOY_CMD="sudo -u landshark bash /opt/landshark/deploy/deploy.sh"
+DEPLOY_CMD="bash /opt/landshark/deploy/deploy.sh"
 
 cd "$(git rev-parse --show-toplevel)"
 
