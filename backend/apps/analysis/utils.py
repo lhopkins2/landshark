@@ -14,26 +14,57 @@ STALE_ANALYSIS_TIMEOUT = 660  # 11 minutes (slightly above Q_CLUSTER retry of 66
 def is_qcluster_running():
     """Check if at least one Django-Q2 cluster is alive.
 
-    Uses Stat.get_all() which reads the cluster heartbeat from the ORM broker.
-    Falls back to checking if any tasks have been processed recently.
+    Detection strategy (all DB-based, cross-process safe):
+
+    1. Stat.get_all() — Django-Q2's built-in stat reporting. Works when a shared
+       cache backend (Redis, memcached, DB cache) is configured. Does NOT work with
+       the default LocMemCache because each process has its own memory.
+
+    2. Recent Success — a task completed in the DB recently, so the worker was alive.
+
+    3. Queue heuristic (ORM broker) — if the task queue is empty, there is no evidence
+       the worker is down, so we give the benefit of the doubt and allow the analysis
+       to proceed. The stale-analysis recovery (11 min timeout) is the safety net.
+       If tasks ARE queued but none are being picked up, the worker is likely dead.
     """
+    # Strategy 1: Django-Q2 Stat (cache-based)
     try:
         from django_q.status import Stat
 
-        stats = Stat.get_all()
-        if len(stats) > 0:
+        if len(Stat.get_all()) > 0:
             return True
     except Exception:
         pass
 
-    # Fallback: check if any task was processed in the last 5 minutes
-    # (covers cases where Stat doesn't detect the cluster but it's working)
+    # Strategy 2: any task completed in the last 5 minutes (DB, cross-process)
     try:
         from django_q.models import Success
 
         cutoff = timezone.now() - datetime.timedelta(minutes=5)
         if Success.objects.filter(stopped__gte=cutoff).exists():
             return True
+    except Exception:
+        pass
+
+    # Strategy 3: queue heuristic (ORM broker only)
+    try:
+        from django_q.models import OrmQ
+
+        queued_count = OrmQ.objects.count()
+        if queued_count == 0:
+            # Queue is empty — no evidence worker is down. Allow the request.
+            # If worker truly isn't running, the stale analysis timeout catches it.
+            return True
+
+        # Tasks are queued. If none are locked (being processed), the worker
+        # isn't picking them up — it's likely dead.
+        locked_count = OrmQ.objects.filter(lock__isnull=False).count()
+        if locked_count > 0:
+            # At least one task is being worked on
+            return True
+
+        # Unlocked tasks sitting in queue with no recent completions = worker is dead
+        return False
     except Exception:
         pass
 

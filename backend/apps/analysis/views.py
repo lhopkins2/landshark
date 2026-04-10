@@ -27,7 +27,7 @@ from .serializers import (
     UserSettingsSerializer,
 )
 from .services.ai_providers import list_models
-from .utils import is_qcluster_running, recover_stale_analyses
+from .utils import STALE_ANALYSIS_TIMEOUT, is_qcluster_running, recover_stale_analyses
 
 logger = logging.getLogger(__name__)
 

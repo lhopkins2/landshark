@@ -45,11 +45,21 @@ class Command(BaseCommand):
 
         call_command("runserver", *runserver_args, **runserver_kwargs)
 
+    @staticmethod
+    def _is_qcluster_process_running():
+        """Check if a qcluster process is already running (OS process-level check)."""
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "manage.py qcluster"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def _start_worker(self):
         """Spawn qcluster as a subprocess, with monitoring and cleanup."""
-        from apps.analysis.utils import is_qcluster_running
-
-        if is_qcluster_running():
+        if self._is_qcluster_process_running():
             self.stdout.write(self.style.SUCCESS("qcluster is already running — skipping spawn."))
             return
 
