@@ -16,6 +16,12 @@ echo "==> Pulling latest code..."
 cd "$APP_DIR"
 git pull origin main
 
+# Load .env so manage.py commands connect to PostgreSQL, not the SQLite fallback
+set -a
+# shellcheck source=/dev/null
+source "$APP_DIR/.env"
+set +a
+
 echo "==> Installing Python dependencies..."
 "$VENV/bin/pip" install -e "$APP_DIR/backend" --quiet
 
