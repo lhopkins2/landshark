@@ -1,7 +1,6 @@
+import os
 from datetime import timedelta
 from pathlib import Path
-
-import os
 
 import dj_database_url
 from decouple import Csv, config
@@ -256,5 +255,7 @@ LOGGING = {
     "loggers": {
         "django": {"handlers": ["console"], "level": "WARNING", "propagate": False},
         "apps": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        # fpdf2 subsets fonts on every PDF render — suppress the resulting flood of INFO lines
+        "fontTools": {"handlers": ["console"], "level": "WARNING", "propagate": False},
     },
 }

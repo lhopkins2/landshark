@@ -1,5 +1,3 @@
-"""Shared utility functions for the analysis app."""
-
 import datetime
 import logging
 

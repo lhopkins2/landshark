@@ -32,6 +32,14 @@ from .utils import STALE_ANALYSIS_TIMEOUT, is_qcluster_running, recover_stale_an
 logger = logging.getLogger(__name__)
 
 
+def _user_is_admin(user):
+    """Return True if the user is a developer or an org admin."""
+    if getattr(user, "is_developer", False):
+        return True
+    membership = getattr(user, "membership", None)
+    return bool(membership and membership.role == "admin")
+
+
 def resolve_api_config(user):
     """Resolve API keys and defaults for a user.
 
@@ -196,7 +204,6 @@ class COTAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
     def retrieve(self, request, *args, **kwargs):
-        # On every poll for a single analysis, check for stale tasks
         recover_stale_analyses()
         return super().retrieve(request, *args, **kwargs)
 
@@ -248,8 +255,6 @@ class RunAnalysisView(APIView):
             doc_qs = Document.objects.all()
             user = request.user
             if not getattr(user, "is_developer", False):
-                from django.db.models import Q
-
                 membership = getattr(user, "membership", None)
                 if not membership:
                     return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -262,10 +267,7 @@ class RunAnalysisView(APIView):
         except Document.DoesNotExist:
             return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Resolve API config with user → org fallback
         default_provider, default_model, api_key_map = resolve_api_config(request.user)
-
-        # Allow per-request provider/model override, fall back to resolved defaults
         provider = serializer.validated_data.get("provider") or default_provider
         model = serializer.validated_data.get("model") or default_model
         api_key = api_key_map.get(provider, "")
@@ -306,7 +308,6 @@ class RunAnalysisView(APIView):
             },
         )
 
-        # Queue background task via Django-Q2
         async_task(
             "apps.analysis.tasks.run_analysis_task",
             str(analysis.id),
@@ -356,12 +357,7 @@ class AnalysisDebugView(APIView):
     """GET endpoint for admin/developer debug info on an analysis."""
 
     def get(self, request, pk):
-        user = request.user
-        is_admin = getattr(user, "is_developer", False)
-        if not is_admin:
-            membership = getattr(user, "membership", None)
-            is_admin = membership and membership.role == "admin"
-        if not is_admin:
+        if not _user_is_admin(request.user):
             return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -394,7 +390,6 @@ class DashboardStatsView(APIView):
         now = timezone.now()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        # Scope documents and analyses to user's org
         is_dev = getattr(user, "is_developer", False)
         membership = getattr(user, "membership", None)
 
@@ -416,7 +411,6 @@ class DashboardStatsView(APIView):
         analyses_this_month = analysis_qs.filter(created_at__gte=month_start).count()
         pending_analyses = analysis_qs.filter(status__in=["pending", "processing"]).count()
 
-        # Recent activity: last 10 analyses
         recent = analysis_qs.select_related("document", "created_by").order_by("-created_at")[:10]
         activity = []
         for a in recent:
@@ -450,12 +444,7 @@ class BackupStatusView(APIView):
         import json
         from pathlib import Path
 
-        user = request.user
-        is_admin = getattr(user, "is_developer", False)
-        if not is_admin:
-            membership = getattr(user, "membership", None)
-            is_admin = membership and membership.role == "admin"
-        if not is_admin:
+        if not _user_is_admin(request.user):
             return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
 
         status_path = Path(self.BACKUP_STATUS_FILE)
@@ -473,7 +462,7 @@ class BackupStatusView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        last_run = datetime.fromisoformat(data["timestamp"])
+        last_run = datetime.datetime.fromisoformat(data["timestamp"])
         age = timezone.now() - last_run
         age_hours = age.total_seconds() / 3600
         healthy = data.get("success", False) and age_hours < self.STALENESS_HOURS

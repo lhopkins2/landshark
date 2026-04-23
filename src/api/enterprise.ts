@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import type { PaginatedResponse } from "../types/models";
 
 export interface EnterpriseStats {
   total_organizations: number;
@@ -47,13 +48,6 @@ export interface ApiUsageResponse {
     total_tokens: number;
   };
   organizations: OrgTokenUsage[];
-}
-
-interface PaginatedResponse<T> {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: T[];
 }
 
 export const enterpriseApi = {

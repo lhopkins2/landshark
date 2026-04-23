@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Building2 } from "lucide-react";
+import { isAxiosError } from "axios";
 import { enterpriseApi } from "../../api/enterprise";
 
 const inputStyle: React.CSSProperties = {
@@ -33,14 +34,16 @@ export default function CreateOrgModal({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ["enterprise-stats"] });
       onClose();
     },
-    onError: (err: { response?: { data?: Record<string, string[]> } }) => {
-      const d = err.response?.data;
-      if (d) {
-        const msg = Object.values(d).flat().join(", ");
-        setError(msg || "Failed to create organization");
-      } else {
-        setError("Failed to create organization");
+    onError: (err: Error) => {
+      if (isAxiosError<Record<string, string[]>>(err)) {
+        const d = err.response?.data;
+        if (d) {
+          const msg = Object.values(d).flat().join(", ");
+          setError(msg || "Failed to create organization");
+          return;
+        }
       }
+      setError("Failed to create organization");
     },
   });
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Plus, UserPlus } from "lucide-react";
+import { isAxiosError } from "axios";
 import { enterpriseApi, type EnterpriseOrgMember } from "../../api/enterprise";
 import { formatDistanceToNow } from "date-fns";
 
@@ -251,14 +252,16 @@ function AddMemberModal({ orgId, onClose }: { orgId: string; onClose: () => void
       queryClient.invalidateQueries({ queryKey: ["enterprise-org", orgId] });
       onClose();
     },
-    onError: (err: { response?: { data?: Record<string, string[]> } }) => {
-      const d = err.response?.data;
-      if (d) {
-        const msg = Object.values(d).flat().join(", ");
-        setError(msg || "Failed to add member");
-      } else {
-        setError("Failed to add member");
+    onError: (err: Error) => {
+      if (isAxiosError<Record<string, string[]>>(err)) {
+        const d = err.response?.data;
+        if (d) {
+          const msg = Object.values(d).flat().join(", ");
+          setError(msg || "Failed to add member");
+          return;
+        }
       }
+      setError("Failed to add member");
     },
   });
 

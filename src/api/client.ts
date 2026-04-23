@@ -34,7 +34,6 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        // If a refresh is already in-flight, wait for it instead of starting another
         if (!refreshPromise) {
           refreshPromise = (async () => {
             const refreshToken = useAuthStore.getState().refreshToken;

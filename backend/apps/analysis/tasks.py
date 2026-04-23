@@ -48,7 +48,18 @@ def run_analysis_task(
         document = Document.objects.get(id=document_id)
         user = user_model.objects.get(id=user_id)
 
-        # Step 1: Prepare document content
+        # Guard against retries on already-terminal analyses (Django-Q2 retries up to max_attempts).
+        if analysis.status == COTAnalysis.Status.COMPLETED:
+            return
+        if analysis.status == COTAnalysis.Status.CANCELLED:
+            return
+
+        # Reset state if this is a retry of a previous failure.
+        if analysis.status == COTAnalysis.Status.FAILED:
+            analysis.status = COTAnalysis.Status.PROCESSING
+            analysis.error_message = ""
+            analysis.save(update_fields=["status", "error_message", "updated_at"])
+
         analysis.progress_step = COTAnalysis.ProgressStep.EXTRACTING_TEXT
         analysis.save(update_fields=["progress_step", "updated_at"])
 
@@ -64,7 +75,6 @@ def run_analysis_task(
 
         _check_cancelled(analysis_id)
 
-        # Step 2: Build structured content
         analysis.progress_step = COTAnalysis.ProgressStep.BUILDING_PROMPT
         analysis.save(update_fields=["progress_step", "updated_at"])
 
@@ -86,7 +96,6 @@ def run_analysis_task(
 
         _check_cancelled(analysis_id)
 
-        # Step 3: Call AI
         analysis.progress_step = COTAnalysis.ProgressStep.CALLING_AI
         analysis.save(update_fields=["progress_step", "updated_at"])
 
@@ -98,7 +107,6 @@ def run_analysis_task(
 
         _check_cancelled(analysis_id)
 
-        # Step 4: Generate document
         analysis.progress_step = COTAnalysis.ProgressStep.GENERATING_DOCUMENT
         analysis.save(update_fields=["progress_step", "updated_at"])
 
@@ -112,8 +120,10 @@ def run_analysis_task(
 
         doc_title = f"{base_name} - Analyzed"
         generated_filename = f"{doc_title}.{ext}"
+        # Scope uniqueness check to the same chain of title to avoid cross-org collisions.
+        scope_qs = Document.objects.filter(chain_of_title=document.chain_of_title)
         version = 1
-        while Document.objects.filter(original_filename=generated_filename).exists():
+        while scope_qs.filter(original_filename=generated_filename).exists():
             version += 1
             doc_title = f"{base_name} - Analyzed - v{version}"
             generated_filename = f"{doc_title}.{ext}"
@@ -134,7 +144,7 @@ def run_analysis_task(
 
         _check_cancelled(analysis_id)
 
-        # Step 5: Complete — use update_fields to avoid overwriting a concurrent cancel
+        # Use update_fields to avoid overwriting a concurrent cancel
         analysis.generated_document = generated_doc
         analysis.status = COTAnalysis.Status.COMPLETED
         analysis.progress_step = COTAnalysis.ProgressStep.COMPLETE

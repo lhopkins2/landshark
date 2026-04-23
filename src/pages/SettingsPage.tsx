@@ -135,6 +135,8 @@ export default function SettingsPage() {
   );
 }
 
+type AnalysisSettingsPayload = Parameters<typeof analysisSettingsApi.update>[0];
+
 function AIConfigSection() {
   const queryClient = useQueryClient();
   const { data: settings } = useQuery({
@@ -150,7 +152,7 @@ function AIConfigSection() {
   const [saved, setSaved] = useState(false);
 
   const saveMutation = useMutation({
-    mutationFn: (data: Record<string, string>) => analysisSettingsApi.update(data),
+    mutationFn: (data: AnalysisSettingsPayload) => analysisSettingsApi.update(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["analysis-settings"] });
       setAnthropicKey("");
@@ -163,14 +165,12 @@ function AIConfigSection() {
 
   const activeProvider = provider || settings?.default_provider || "anthropic";
 
-  // Check if the active provider has an API key configured
   const providerHasKey = settings && (
     (activeProvider === "anthropic" && settings.anthropic_api_key_display) ||
     (activeProvider === "openai" && settings.openai_api_key_display) ||
     (activeProvider === "gemini" && settings.gemini_api_key_display)
   );
 
-  // Auto-fetch models from the provider's API
   const { data: liveModels, isLoading: loadingModels, error: modelsError, refetch: refetchModels } = useQuery({
     queryKey: ["provider-models", activeProvider],
     queryFn: () => analysisSettingsApi.listModels(activeProvider).then((r) => r.data.models),
@@ -184,7 +184,7 @@ function AIConfigSection() {
   const activeModel = model || settings?.default_model || (modelList ? modelList[0]?.id : Object.keys(hardcodedModels)[0]) || "";
 
   const handleSave = () => {
-    const data: Record<string, string> = {};
+    const data: AnalysisSettingsPayload = {};
     if (activeProvider) data.default_provider = activeProvider;
     data.default_model = model || activeModel;
     if (anthropicKey) data.anthropic_api_key = anthropicKey;

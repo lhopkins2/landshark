@@ -65,7 +65,7 @@ class Document(TimestampedModel):
         blank=True,
         related_name="documents",
     )
-    file = models.FileField(upload_to=document_upload_path)
+    file = models.FileField(upload_to=document_upload_path, max_length=500)
     original_filename = models.CharField(max_length=255)
     file_size = models.PositiveIntegerField(default=0)
     mime_type = models.CharField(max_length=100, blank=True, default="")

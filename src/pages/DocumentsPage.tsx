@@ -2,8 +2,10 @@ import { useState, useRef, useCallback, type DragEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, FileText, Plus, Upload, Pencil, X, Download, FolderOpen, Folder, ChevronLeft, FolderPlus, Archive, AlertTriangle } from "lucide-react";
 import JSZip from "jszip";
+import { isAxiosError } from "axios";
 import { documentsApi, foldersApi } from "../api/documents";
 import DocumentDetailDrawer from "../components/DocumentDetailDrawer";
+import { formatFileSize } from "../utils/format";
 import type { Document, DocumentFolder } from "../types/models";
 
 export default function DocumentsPage() {
@@ -36,7 +38,6 @@ export default function DocumentsPage() {
     select: (res) => res.data,
   });
 
-  // When viewing "All Documents" (no folder), also fetch unfiled docs
   const { data: unfiledData, isLoading: isLoadingUnfiled } = useQuery({
     queryKey: ["documents", { folder__isnull: "true", ...(search ? { search } : {}) }],
     queryFn: () => {
@@ -665,8 +666,6 @@ export default function DocumentsPage() {
   );
 }
 
-/* ---- Sub-components ---- */
-
 function NewFolderForm({ isPending, onSave, onClose }: { isPending: boolean; onSave: (name: string) => void; onClose: () => void }) {
   const [name, setName] = useState("");
   return (
@@ -824,10 +823,15 @@ function UploadForm({ folders, currentFolderId, onClose, onUploaded }: { folders
       return documentsApi.upload(formData);
     },
     onSuccess: () => onUploaded(),
-    onError: (err: unknown) => {
-      const axiosErr = err as { response?: { data?: Record<string, unknown> } };
-      const detail = axiosErr?.response?.data?.detail || axiosErr?.response?.data?.file;
-      setError(detail ? String(detail) : "Failed to upload document.");
+    onError: (err: Error) => {
+      if (isAxiosError<{ detail?: string; file?: string | string[] }>(err)) {
+        const data = err.response?.data;
+        const fileField = data?.file;
+        const fileErr = Array.isArray(fileField) ? fileField[0] : fileField;
+        setError(data?.detail ?? fileErr ?? "Failed to upload document.");
+      } else {
+        setError("Failed to upload document.");
+      }
     },
   });
 
@@ -1126,10 +1130,3 @@ function DocMetadataModal({
   );
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}

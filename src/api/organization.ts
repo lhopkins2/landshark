@@ -19,7 +19,7 @@ export const orgApi = {
   }) =>
     apiClient.post<OrgMember>("/auth/org/members/", data),
 
-  updateMember: (id: string, data: Record<string, unknown>) =>
+  updateMember: (id: string, data: Partial<Pick<OrgMember, "role" | "has_api_key_access" | "is_active">>) =>
     apiClient.patch<OrgMember>(`/auth/org/members/${id}/`, data),
 
   deactivateMember: (id: string) =>

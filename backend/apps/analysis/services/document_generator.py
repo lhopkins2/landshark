@@ -3,10 +3,6 @@ import re
 from copy import deepcopy
 from pathlib import Path
 
-_FONTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "fonts"
-_FONT_REGULAR = str(_FONTS_DIR / "DejaVuSans.ttf")
-_FONT_BOLD = str(_FONTS_DIR / "DejaVuSans-Bold.ttf")
-
 from docx import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
@@ -15,9 +11,12 @@ from fpdf import FPDF
 from fpdf.enums import TableBordersLayout
 from fpdf.fonts import FontFace
 
+_FONTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "fonts"
+_FONT_REGULAR = str(_FONTS_DIR / "DejaVuSans.ttf")
+_FONT_BOLD = str(_FONTS_DIR / "DejaVuSans-Bold.ttf")
+
 
 def generate_docx(text: str, title: str = "") -> io.BytesIO:
-    """Generate a DOCX file from analysis result text."""
     doc = DocxDocument()
 
     if title:
@@ -97,7 +96,6 @@ def _clean_cell_text(text: str) -> str:
 
 
 def _parse_table_row(line: str) -> list[str]:
-    """Parse a markdown table row into cell values."""
     cells = line.strip().strip("|").split("|")
     return [_clean_cell_text(c) for c in cells]
 
@@ -127,7 +125,6 @@ def _compute_col_widths(headers: list[str], total_width: float) -> list[float]:
 
 
 def _render_pdf_table(pdf: FPDF, rows: list[list[str]]) -> None:
-    """Render collected markdown table rows as a proper fpdf2 table."""
     if not rows:
         return
 
@@ -159,7 +156,6 @@ def _render_pdf_table(pdf: FPDF, rows: list[list[str]]) -> None:
 
 
 def generate_pdf(text: str, title: str = "") -> io.BytesIO:
-    """Generate a PDF file from analysis result text."""
     pdf = FPDF()
     pdf.add_font("DejaVu", "", _FONT_REGULAR)
     pdf.add_font("DejaVu", "B", _FONT_BOLD)
@@ -226,7 +222,6 @@ def generate_pdf(text: str, title: str = "") -> io.BytesIO:
 
 
 def generate_document(text: str, output_format: str, title: str = "") -> io.BytesIO:
-    """Generate a document in the specified format."""
     if output_format == "docx":
         return generate_docx(text, title)
     return generate_pdf(text, title)

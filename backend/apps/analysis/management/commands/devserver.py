@@ -101,7 +101,7 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, sigterm_handler)
 
         # Monitor thread: respawn worker if it crashes, with exponential backoff
-        MAX_FAILURES = 5
+        max_failures = 5
 
         def monitor():
             consecutive_failures = 0
@@ -114,7 +114,7 @@ class Command(BaseCommand):
                     continue
 
                 consecutive_failures += 1
-                if consecutive_failures > MAX_FAILURES:
+                if consecutive_failures > max_failures:
                     self.stderr.write(self.style.ERROR(
                         f"qcluster has crashed {consecutive_failures} times in a row. "
                         "Giving up — check for errors above and restart manually."
@@ -124,7 +124,7 @@ class Command(BaseCommand):
                 backoff = min(10 * consecutive_failures, 60)
                 self.stderr.write(self.style.WARNING(
                     f"qcluster exited (code {p.returncode}). "
-                    f"Respawning in {backoff}s (attempt {consecutive_failures}/{MAX_FAILURES})..."
+                    f"Respawning in {backoff}s (attempt {consecutive_failures}/{max_failures})..."
                 ))
                 time.sleep(backoff)
                 try:

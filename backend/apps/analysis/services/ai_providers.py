@@ -12,9 +12,7 @@ _DOCUMENT_SECTION = "## DOCUMENT CONTENT"
 
 
 def load_prompt_template():
-    """Load the prompt template from disk."""
     return PROMPT_FILE.read_text(encoding="utf-8")
-
 
 
 def build_prompt_content(
@@ -109,10 +107,6 @@ def build_prompt(document_content, analysis_order, custom_request="", legal_desc
     )
     return blocks[0]["text"]
 
-
-# ---------------------------------------------------------------------------
-# Provider API calls
-# ---------------------------------------------------------------------------
 
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-20250514",
@@ -277,12 +271,7 @@ def run_analysis(content, provider, api_key, model=""):
     return func(content, api_key, model)
 
 
-# ---------------------------------------------------------------------------
-# Model listing (unchanged)
-# ---------------------------------------------------------------------------
-
 def list_anthropic_models(api_key):
-    """List available Anthropic models."""
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -313,7 +302,6 @@ OPENAI_DISPLAY_NAMES = {
 
 
 def _openai_display_name(model_id):
-    """Get a friendly display name for an OpenAI model ID."""
     if model_id in OPENAI_DISPLAY_NAMES:
         return OPENAI_DISPLAY_NAMES[model_id]
     base = model_id
@@ -328,7 +316,6 @@ def _openai_display_name(model_id):
 
 
 def list_openai_models(api_key):
-    """List available OpenAI chat models."""
     import openai
 
     client = openai.OpenAI(api_key=api_key)
@@ -343,7 +330,6 @@ def list_openai_models(api_key):
 
 
 def list_gemini_models(api_key):
-    """List available Gemini generative models."""
     import google.generativeai as genai
 
     with _gemini_lock:
@@ -364,7 +350,6 @@ LIST_MODELS_FUNCTIONS = {
 
 
 def list_models(provider, api_key):
-    """List available models for a provider."""
     func = LIST_MODELS_FUNCTIONS.get(provider)
     if not func:
         raise ValueError(f"Unknown provider: {provider}")

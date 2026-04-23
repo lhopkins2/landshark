@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { UserPlus, Shield, User, KeyRound, Loader, Code } from "lucide-react";
+import { isAxiosError } from "axios";
 import { orgApi } from "../api/organization";
 import CreateUserModal from "../components/CreateUserModal";
 import type { OrgMember, UserRole } from "../types/models";
@@ -25,19 +26,21 @@ export default function UserManagementPage() {
       setShowCreateModal(false);
       setCreateError(null);
     },
-    onError: (err: { response?: { data?: Record<string, string[]> } }) => {
-      const detail = err?.response?.data;
-      if (typeof detail === "object") {
-        const messages = Object.values(detail).flat().join(". ");
-        setCreateError(messages);
-      } else {
-        setCreateError("Failed to create user.");
+    onError: (err: Error) => {
+      if (isAxiosError<Record<string, string[]>>(err)) {
+        const detail = err.response?.data;
+        if (detail && typeof detail === "object") {
+          const messages = Object.values(detail).flat().join(". ");
+          setCreateError(messages);
+          return;
+        }
       }
+      setCreateError("Failed to create user.");
     },
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<Pick<OrgMember, "role" | "has_api_key_access" | "is_active">> }) =>
       orgApi.updateMember(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["org-members"] });

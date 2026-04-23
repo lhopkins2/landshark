@@ -12,11 +12,7 @@ export function extractSearchTerms(row: string[]): string[] {
 
     // Split on common separators (commas, semicolons) and add each part
     const parts = value.split(/[;,]/).map((p) => p.trim()).filter((p) => p.length >= 3);
-    if (parts.length > 1) {
-      terms.push(...parts);
-    } else {
-      terms.push(value);
-    }
+    terms.push(...(parts.length > 1 ? parts : [value]));
   }
 
   return terms;

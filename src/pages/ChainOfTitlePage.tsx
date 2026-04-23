@@ -6,9 +6,12 @@ import {
   Folder, ChevronLeft, FolderOpen,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { isAxiosError } from "axios";
 import { documentsApi, foldersApi } from "../api/documents";
 import { analysesApi, analysisSettingsApi } from "../api/analysis";
-import { ANALYSIS_ORDERS, ANALYSIS_STATUSES, PROGRESS_STEPS } from "../utils/constants";
+import { ANALYSIS_ORDERS, PROGRESS_STEPS } from "../utils/constants";
+import { formatFileSize } from "../utils/format";
+import StatusBadge from "../components/StatusBadge";
 import type { Document, DocumentFolder, COTAnalysis, AnalysisOrder, OutputFormat } from "../types/models";
 
 export default function ChainOfTitlePage() {
@@ -113,7 +116,6 @@ export default function ChainOfTitlePage() {
     },
   });
 
-  // Analyze mutation — returns immediately, then we poll
   const analyzeMutation = useMutation({
     mutationFn: () => {
       if (!selectedDocId) throw new Error("Select a document");
@@ -131,19 +133,20 @@ export default function ChainOfTitlePage() {
       setElapsedSeconds(0);
       setCurrentResult(null);
     },
-    onError: (err: unknown) => {
-      const axiosErr = err as { response?: { data?: { id?: string; detail?: string } } };
-      if (axiosErr?.response?.data?.id) {
-        setCurrentResult(axiosErr.response.data as COTAnalysis);
-      }
-      // Surface 503 worker-down error clearly
-      if (axiosErr?.response?.data?.detail) {
-        setWorkerError(axiosErr.response.data.detail);
+    onError: (err: Error) => {
+      if (isAxiosError<Partial<COTAnalysis> & { detail?: string }>(err)) {
+        const data = err.response?.data;
+        if (data?.id) {
+          setCurrentResult(data as COTAnalysis);
+        }
+        // Surface 503 worker-down error clearly
+        if (data?.detail) {
+          setWorkerError(data.detail);
+        }
       }
     },
   });
 
-  // Cancel mutation
   const cancelMutation = useMutation({
     mutationFn: () => {
       if (!pollingAnalysisId) throw new Error("No analysis to cancel");
@@ -157,14 +160,12 @@ export default function ChainOfTitlePage() {
     },
   });
 
-  // Poll for analysis progress
   const { data: polledAnalysis, refetch: refetchProgress } = useQuery({
     queryKey: ["analysis-progress", pollingAnalysisId],
     queryFn: () => analysesApi.get(pollingAnalysisId!).then((r) => r.data),
     enabled: !!pollingAnalysisId,
   });
 
-  // Derived polling state
   const pollingDone = polledAnalysis?.status === "completed" || polledAnalysis?.status === "failed" || polledAnalysis?.status === "cancelled";
   const isAnalyzing = !!pollingAnalysisId && !pollingDone;
 
@@ -597,8 +598,6 @@ export default function ChainOfTitlePage() {
         {selectedDocId && !hasApiKey && <HintText>Configure an API key in Settings</HintText>}
       </div>
 
-      {/* Progress Note */}
-
       {/* Current Result */}
       {(currentResult || (pollingDone && polledAnalysis)) && (
         <SectionCard title="Result" onClose={() => setCurrentResult(null)}>
@@ -627,9 +626,6 @@ export default function ChainOfTitlePage() {
     </div>
   );
 }
-
-// -- Subcomponents --
-
 
 function SectionCard({ title, children, onClose }: { title: string; children: React.ReactNode; onClose?: () => void }) {
   return (
@@ -868,28 +864,6 @@ function PastAnalysisItem({ analysis, onView, onReview }: { analysis: COTAnalysi
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
-    completed: { bg: "rgba(34,197,94,0.1)", text: "#22c55e", icon: <CheckCircle size={12} /> },
-    failed: { bg: "rgba(239,68,68,0.1)", text: "#ef4444", icon: <XCircle size={12} /> },
-    processing: { bg: "rgba(59,130,246,0.1)", text: "#3b82f6", icon: <Loader size={12} className="spin" /> },
-    pending: { bg: "rgba(234,179,8,0.1)", text: "#eab308", icon: <Clock size={12} /> },
-    cancelled: { bg: "rgba(156,163,175,0.1)", text: "#9ca3af", icon: <XCircle size={12} /> },
-  };
-  const c = colors[status] ?? colors.pending;
-  const label = ANALYSIS_STATUSES[status as keyof typeof ANALYSIS_STATUSES] ?? status;
-
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 4,
-      padding: "2px 8px", borderRadius: "var(--ls-radius-full)",
-      backgroundColor: c.bg, color: c.text, fontSize: "var(--ls-text-xs)", fontWeight: 600,
-    }}>
-      {c.icon} {label}
-    </span>
-  );
-}
-
 function HintText({ children }: { children: React.ReactNode }) {
   return (
     <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: "var(--ls-space-xs)" }}>
@@ -1010,10 +984,3 @@ function DocMetadataModal({ title, fileName, fileSize, initialTract, initialHold
   );
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
