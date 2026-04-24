@@ -35,7 +35,6 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
     }
   }, [documentId, blobUrl]);
 
-  // Fetch content when mode or documentId changes
   useEffect(() => {
     let cancelled = false;
 
@@ -43,7 +42,6 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
       setError(null);
 
       if (mode === "text") {
-        // Already have text cached
         if (text !== null) {
           setLoading(false);
           return;
@@ -62,7 +60,6 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
           }
         }
       } else {
-        // Document mode
         if (isPdf) {
           if (blobUrl) { setLoading(false); return; }
           setLoading(true);
@@ -123,7 +120,6 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
     return DOMPurify.sanitize(highlightText(text, highlightTerms));
   }, [text, highlightTerms, mode]);
 
-  // Auto-scroll to first highlight
   useEffect(() => {
     if (mode === "text" && highlightTerms.length > 0 && textRef.current) {
       setTimeout(() => {
@@ -141,10 +137,8 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
     return <div className="review-viewer-error">{error}</div>;
   }
 
-  // Text mode
   if (mode === "text") {
     if (highlightedHtml) {
-      // highlightedHtml is pre-sanitized with DOMPurify (see useMemo above)
       return (
         <div
           ref={textRef}
@@ -160,15 +154,13 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
     );
   }
 
-  // Document mode — PDF
   if (isPdf && blobUrl) {
     const src = pageNumber ? `${blobUrl}#page=${pageNumber}` : blobUrl;
-    // key forces iframe remount when page changes — blob URL fragment changes alone
-    // don't reliably cause the browser's PDF viewer to navigate
+    // Force iframe remount on page change — fragment-only changes don't reliably
+    // navigate the browser's built-in PDF viewer.
     return <iframe key={pageNumber ?? 0} src={src} className="review-doc-iframe" title="PDF viewer" />;
   }
 
-  // Document mode — DOCX
   if (isDocx && docHtml) {
     return (
       <div
@@ -178,7 +170,6 @@ export default function DocumentViewer({ documentId, mimeType, mode, highlightTe
     );
   }
 
-  // Fallback text
   if (text !== null) {
     return <div className="review-text-content">{text}</div>;
   }

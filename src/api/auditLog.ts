@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import type { PaginatedResponse } from "../types/models";
 
 export interface AuditLogEntry {
   id: string;
@@ -9,13 +10,6 @@ export interface AuditLogEntry {
   document_id: string | null;
   details: Record<string, unknown>;
   created_at: string;
-}
-
-interface PaginatedResponse<T> {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: T[];
 }
 
 export const auditLogApi = {

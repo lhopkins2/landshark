@@ -2,7 +2,6 @@ import datetime
 import logging
 
 from django.core.files.base import ContentFile
-from django.db.models import Q
 from django.utils import timezone
 from django_q.tasks import async_task
 from rest_framework import status, viewsets
@@ -11,10 +10,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.mixins import get_user_organization
 from apps.accounts.permissions import HasApiKeyAccess, IsOrgAdmin
 from apps.core.audit import log_action
 from apps.core.models import AuditLog
-from apps.documents.models import Document
+from apps.documents.models import Document, org_scoped_documents
 
 from .models import COTAnalysis, FormTemplate, OrganizationSettings, UserSettings
 from .serializers import (
@@ -49,20 +49,17 @@ def resolve_api_config(user):
     """
     from apps.accounts.models import Membership
 
-    # Check if user has personal settings with keys
     try:
         user_settings = UserSettings.objects.get(user=user)
     except UserSettings.DoesNotExist:
         user_settings = None
 
-    # Determine if user has API key access
     has_access = getattr(user, "is_developer", False)
     if not has_access:
         membership = getattr(user, "membership", None)
         if membership:
             has_access = membership.role == "admin" or membership.has_api_key_access
 
-    # If user has access and personal keys, use them
     if has_access and user_settings:
         key_map = {
             "anthropic": user_settings.anthropic_api_key,
@@ -72,7 +69,6 @@ def resolve_api_config(user):
         if any(key_map.values()):
             return user_settings.default_provider, user_settings.default_model, key_map
 
-    # Fall back to org settings
     try:
         membership = user.membership
         org_settings = OrganizationSettings.objects.get(organization=membership.organization)
@@ -85,7 +81,6 @@ def resolve_api_config(user):
     except (Membership.DoesNotExist, OrganizationSettings.DoesNotExist):
         pass
 
-    # No keys available at all
     if user_settings:
         return user_settings.default_provider, user_settings.default_model, {
             "anthropic": user_settings.anthropic_api_key,
@@ -122,7 +117,8 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         template = serializer.save()
 
-        # Also create a Document record so it appears in Documents tab
+        # Mirror the template as a Document so it shows up in the Documents tab
+        # with its own file copy under the documents/ media path.
         doc = Document(
             original_filename=template.original_filename,
             file_size=template.file_size,
@@ -130,7 +126,6 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
             description=f"Form template: {template.name}",
             uploaded_by=request.user,
         )
-        # Copy file content so Document has its own file in documents/ path
         template.file.seek(0)
         doc.file.save(template.original_filename, ContentFile(template.file.read()), save=True)
 
@@ -166,22 +161,15 @@ class OrgSettingsView(APIView):
 
     permission_classes = [IsAuthenticated, IsOrgAdmin]
 
-    def _get_org(self, user):
-        from apps.accounts.models import Membership
-        try:
-            return user.membership.organization
-        except Membership.DoesNotExist:
-            return None
-
     def get(self, request):
-        org = self._get_org(request.user)
+        org = get_user_organization(request.user)
         if not org:
             return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
         settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
         return Response(OrganizationSettingsSerializer(settings_obj).data)
 
     def put(self, request):
-        org = self._get_org(request.user)
+        org = get_user_organization(request.user)
         if not org:
             return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
         settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
@@ -238,7 +226,6 @@ class RunAnalysisView(APIView):
         serializer = RunAnalysisSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # Pre-flight: ensure the background worker is running
         if not is_qcluster_running():
             return Response(
                 {
@@ -252,18 +239,7 @@ class RunAnalysisView(APIView):
             )
 
         try:
-            doc_qs = Document.objects.all()
-            user = request.user
-            if not getattr(user, "is_developer", False):
-                membership = getattr(user, "membership", None)
-                if not membership:
-                    return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
-                org = membership.organization
-                doc_qs = doc_qs.filter(
-                    Q(chain_of_title__project__client__organization=org)
-                    | Q(chain_of_title__isnull=True, uploaded_by__membership__organization=org)
-                )
-            document = doc_qs.get(id=serializer.validated_data["document_id"])
+            document = org_scoped_documents(request.user).get(id=serializer.validated_data["document_id"])
         except Document.DoesNotExist:
             return Response({"detail": "Document not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -393,18 +369,12 @@ class DashboardStatsView(APIView):
         is_dev = getattr(user, "is_developer", False)
         membership = getattr(user, "membership", None)
 
+        doc_qs = org_scoped_documents(user)
         if is_dev:
-            doc_qs = Document.objects.all()
             analysis_qs = COTAnalysis.objects.all()
         elif membership:
-            org = membership.organization
-            doc_qs = Document.objects.filter(
-                Q(chain_of_title__project__client__organization=org)
-                | Q(chain_of_title__isnull=True, uploaded_by__membership__organization=org)
-            )
-            analysis_qs = COTAnalysis.objects.filter(created_by__membership__organization=org)
+            analysis_qs = COTAnalysis.objects.filter(created_by__membership__organization=membership.organization)
         else:
-            doc_qs = Document.objects.none()
             analysis_qs = COTAnalysis.objects.none()
 
         total_documents = doc_qs.count()

@@ -42,7 +42,6 @@ export default function EnterpriseSidebar() {
         overflow: "hidden",
       }}
     >
-      {/* Logo */}
       <div
         style={{
           padding: "var(--ls-space-md) var(--ls-space-lg)",
@@ -84,7 +83,6 @@ export default function EnterpriseSidebar() {
         )}
       </div>
 
-      {/* Navigation */}
       <nav style={{ flex: 1 }}>
         {navItems.map(({ to, icon: Icon, label }) => (
           <NavLink key={to} to={to} end={to === "/enterprise"} title={collapsed ? label : undefined} style={navLinkStyle}>
@@ -101,7 +99,6 @@ export default function EnterpriseSidebar() {
         </NavLink>
       </nav>
 
-      {/* Collapse toggle */}
       <button
         onClick={toggleCollapsed}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}

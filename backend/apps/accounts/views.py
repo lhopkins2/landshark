@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
+from .mixins import get_user_organization
 from .models import Membership
 from .permissions import IsOrgAdmin
 from .serializers import (
@@ -63,25 +64,19 @@ class CurrentUserView(APIView):
 class OrgMemberListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsOrgAdmin]
 
-    def _get_org(self, user):
-        try:
-            return user.membership.organization
-        except Membership.DoesNotExist:
-            return None
-
     def get(self, request):
-        if getattr(request.user, "is_developer", False) and not self._get_org(request.user):
+        if getattr(request.user, "is_developer", False) and not get_user_organization(request.user):
             # Developers without a membership see all members
             members = Membership.objects.select_related("user", "organization").order_by("user__email")
         else:
-            org = self._get_org(request.user)
+            org = get_user_organization(request.user)
             if not org:
                 return Response([], status=status.HTTP_200_OK)
             members = Membership.objects.filter(organization=org).select_related("user").order_by("user__email")
         return Response(MemberSerializer(members, many=True).data)
 
     def post(self, request):
-        org = self._get_org(request.user)
+        org = get_user_organization(request.user)
         if not org:
             return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = CreateMemberSerializer(
@@ -105,11 +100,8 @@ class OrgMemberDetailView(APIView):
         if getattr(request.user, "is_developer", False):
             return membership
         # Non-developers can only access members in their own org
-        try:
-            requesting_org = request.user.membership.organization
-        except Membership.DoesNotExist:
-            return None
-        if membership.organization != requesting_org:
+        requesting_org = get_user_organization(request.user)
+        if requesting_org is None or membership.organization != requesting_org:
             return None
         return membership
 

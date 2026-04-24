@@ -21,7 +21,6 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* Theme */}
       <div style={{
         padding: "var(--ls-space-lg)",
         backgroundColor: "var(--ls-surface)",
@@ -54,7 +53,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* AI Configuration */}
       {hasApiKeyAccess ? (
         <AIConfigSection />
       ) : (
@@ -84,7 +82,6 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Profile */}
       {user && (
         <div style={{
           padding: "var(--ls-space-lg)",
@@ -104,7 +101,6 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Logout */}
       <div style={{
         padding: "var(--ls-space-lg)",
         backgroundColor: "var(--ls-surface)",
@@ -217,7 +213,6 @@ function AIConfigSection() {
       </h3>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--ls-space-md)" }}>
-        {/* Provider Selection */}
         <div>
           <label style={{ display: "block", fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginBottom: 4 }}>
             Default Provider
@@ -237,7 +232,6 @@ function AIConfigSection() {
           </select>
         </div>
 
-        {/* Model Selection */}
         <div>
           <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginBottom: 4 }}>
             Model
@@ -296,7 +290,6 @@ function AIConfigSection() {
           )}
         </div>
 
-        {/* API Keys */}
         <div>
           <label style={{ display: "block", fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginBottom: 4 }}>
             Anthropic API Key

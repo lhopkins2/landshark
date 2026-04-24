@@ -26,7 +26,6 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Stats cards */}
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
@@ -43,7 +42,6 @@ export default function DashboardPage() {
         gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
         gap: "var(--ls-space-lg)",
       }}>
-        {/* Feature cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--ls-space-lg)" }}>
           <FeatureCard
             to="/chain-of-title"
@@ -60,7 +58,6 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* Activity feed */}
         <div style={{
           backgroundColor: "var(--ls-surface)",
           border: "1px solid var(--ls-border)",

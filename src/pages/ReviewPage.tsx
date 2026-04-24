@@ -57,7 +57,6 @@ export default function ReviewPage() {
     });
   }, [parsed]);
 
-  // Search: find matching row indices
   const matchingIndices = useMemo(() => {
     if (!parsed || !searchTerm.trim()) return null;
     const term = searchTerm.toLowerCase();
@@ -70,7 +69,6 @@ export default function ReviewPage() {
     return indices;
   }, [parsed, searchTerm]);
 
-  // Highlight a search term within a cell string, returning sanitized HTML
   function highlightCell(text: string): string {
     if (!searchTerm.trim()) return "";
     const escaped = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -87,9 +85,8 @@ export default function ReviewPage() {
     }
     setSelectedRowIdx(idx);
 
-    // If the table has a page column, navigate the PDF to that page
     if (docPgColIdx >= 0 && parsed) {
-      // Strip markdown bold (**...**) and grab the first integer (handles ranges like "91-96")
+      // Strip markdown bold and take the first integer — handles ranges like "91-96".
       const rawVal = (parsed.rows[idx][docPgColIdx] ?? "").replace(/\*+/g, "").trim();
       const pageNum = parseInt(rawVal, 10);
       if (!isNaN(pageNum) && pageNum > 0) {
@@ -99,7 +96,7 @@ export default function ReviewPage() {
       }
     }
 
-    // Fallback for analyses without page numbers: switch to text + highlight
+    // No page column: fall back to text mode with term highlighting.
     setSelectedPage(null);
     setRightMode("text");
   }
@@ -126,7 +123,6 @@ export default function ReviewPage() {
 
   return (
     <div className="review-container">
-      {/* Header */}
       <div className="review-header">
         <button onClick={() => navigate("/chain-of-title")} className="review-back-link">
           <ArrowLeft size={16} />
@@ -144,9 +140,7 @@ export default function ReviewPage() {
         </div>
       </div>
 
-      {/* Panels */}
       <div className="review-panels">
-        {/* Left Panel — Processed Output */}
         <div className="review-panel">
           <div className="review-panel-header">
             <span className="review-panel-label">Processed Output</span>
@@ -167,7 +161,6 @@ export default function ReviewPage() {
               )}
             </div>
           </div>
-          {/* Search bar */}
           {leftMode === "text" && parsed && parsed.headers.length > 0 && (
             <div className="review-search-bar">
               <Search size={14} style={{ color: "var(--ls-text-muted)", flexShrink: 0 }} />
@@ -193,7 +186,6 @@ export default function ReviewPage() {
           <div className="review-panel-body">
             {leftMode === "text" && parsed ? (
               <div className="review-table-wrapper">
-                {/* Header fields */}
                 {Object.keys(parsed.headerFields).length > 0 && (
                   <div className="review-header-fields">
                     {Object.entries(parsed.headerFields).map(([key, value]) => (
@@ -204,7 +196,6 @@ export default function ReviewPage() {
                     ))}
                   </div>
                 )}
-                {/* Table */}
                 {parsed.headers.length > 0 && (
                   <table className="review-table">
                     <thead>
@@ -225,7 +216,7 @@ export default function ReviewPage() {
                             onClick={() => handleRowClick(idx)}
                           >
                             {row.map((cell, ci) => {
-                              // Highlight matching cells — HTML is sanitized via DOMPurify in highlightCell()
+                              // highlightCell sanitizes via DOMPurify before injecting.
                               if (isMatch && searchTerm.trim()) {
                                 const sanitizedHtml = highlightCell(cell);
                                 return (
@@ -262,7 +253,6 @@ export default function ReviewPage() {
           </div>
         </div>
 
-        {/* Right Panel — Source Document */}
         <div className="review-panel">
           <div className="review-panel-header">
             <span className="review-panel-label">Source Document</span>

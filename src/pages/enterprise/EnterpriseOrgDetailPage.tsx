@@ -55,7 +55,6 @@ export default function EnterpriseOrgDetailPage() {
         <ArrowLeft size={14} /> Back to Organizations
       </Link>
 
-      {/* Org info */}
       <div style={{
         backgroundColor: "var(--ls-surface)",
         border: "1px solid var(--ls-border)",
@@ -126,7 +125,6 @@ export default function EnterpriseOrgDetailPage() {
         </div>
       </div>
 
-      {/* Members */}
       <div style={{
         backgroundColor: "var(--ls-surface)",
         border: "1px solid var(--ls-border)",

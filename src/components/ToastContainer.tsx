@@ -74,13 +74,12 @@ export function useAnalysisNotifications() {
         for (const analysis of data.results) {
           const id = analysis.id;
 
-          // Track any processing analyses
           if (analysis.status === "processing" || analysis.status === "pending") {
             trackedIds.current.add(id);
             continue;
           }
 
-          // If it was tracked and is now done, fire a toast
+          // Only toast analyses we saw in-progress this session, to avoid re-firing on reload.
           if (trackedIds.current.has(id)) {
             trackedIds.current.delete(id);
             if (analysis.status === "completed") {

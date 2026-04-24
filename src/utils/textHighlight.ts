@@ -10,7 +10,6 @@ export function extractSearchTerms(row: string[]): string[] {
     const value = cell.trim();
     if (value.length < 3 || skipWords.has(value.toLowerCase())) continue;
 
-    // Split on common separators (commas, semicolons) and add each part
     const parts = value.split(/[;,]/).map((p) => p.trim()).filter((p) => p.length >= 3);
     terms.push(...(parts.length > 1 ? parts : [value]));
   }

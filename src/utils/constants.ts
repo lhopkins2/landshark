@@ -46,11 +46,3 @@ export const PROGRESS_STEPS = {
   cancelled: { label: "Cancelled", description: "Analysis was cancelled." },
 } as const;
 
-export const PROGRESS_STEP_ORDER = [
-  "extracting_text",
-  "building_prompt",
-  "calling_ai",
-  "generating_document",
-  "complete",
-] as const;
-

@@ -49,7 +49,6 @@ export default function EnterpriseOrgsPage() {
         </button>
       </div>
 
-      {/* Filters */}
       <div style={{
         display: "flex",
         gap: "var(--ls-space-sm)",
@@ -92,7 +91,6 @@ export default function EnterpriseOrgsPage() {
         </select>
       </div>
 
-      {/* Table */}
       <div style={{
         backgroundColor: "var(--ls-surface)",
         border: "1px solid var(--ls-border)",

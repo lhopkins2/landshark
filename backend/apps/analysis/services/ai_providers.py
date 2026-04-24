@@ -96,18 +96,6 @@ def build_prompt_content(
     return content
 
 
-def build_prompt(document_content, analysis_order, custom_request="", legal_description=""):
-    """Build a text-only prompt string (backward-compatible wrapper)."""
-    blocks = build_prompt_content(
-        page_images=[],
-        document_text=document_content,
-        analysis_order=analysis_order,
-        custom_request=custom_request,
-        legal_description=legal_description,
-    )
-    return blocks[0]["text"]
-
-
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-20250514",
     "openai": "gpt-4o",
@@ -126,10 +114,9 @@ _gemini_lock = threading.Lock()
 
 def _max_tokens_for_content(content):
     """Scale max_tokens based on whether the request includes many images."""
-    if isinstance(content, list):
-        image_count = sum(1 for b in content if b.get("type") == "image")
-        if image_count >= LARGE_DOC_PAGE_THRESHOLD:
-            return LARGE_DOC_MAX_TOKENS
+    image_count = sum(1 for b in content if b.get("type") == "image")
+    if image_count >= LARGE_DOC_PAGE_THRESHOLD:
+        return LARGE_DOC_MAX_TOKENS
     return DEFAULT_MAX_TOKENS
 
 
@@ -179,23 +166,15 @@ def _format_gemini(content_blocks):
     return parts
 
 
-def _normalize_content(content):
-    """Ensure content is a list of blocks (supports legacy string input)."""
-    if isinstance(content, str):
-        return [{"type": "text", "text": content}]
-    return content
-
-
 def call_anthropic(content, api_key, model=""):
     """Call Anthropic Claude API with text or vision content."""
     import anthropic
 
-    blocks = _normalize_content(content)
     client = anthropic.Anthropic(api_key=api_key, timeout=AI_CALL_TIMEOUT)
     message = client.messages.create(
         model=model or DEFAULT_MODELS["anthropic"],
-        max_tokens=_max_tokens_for_content(blocks),
-        messages=[{"role": "user", "content": _format_anthropic(blocks)}],
+        max_tokens=_max_tokens_for_content(content),
+        messages=[{"role": "user", "content": _format_anthropic(content)}],
     )
     if not message.content:
         raise ValueError("Anthropic returned an empty response.")
@@ -212,12 +191,11 @@ def call_openai(content, api_key, model=""):
     """Call OpenAI GPT API with text or vision content."""
     import openai
 
-    blocks = _normalize_content(content)
     resolved_model = model or DEFAULT_MODELS["openai"]
     client = openai.OpenAI(api_key=api_key, timeout=AI_CALL_TIMEOUT)
 
     # Reasoning models (o1/o3/o4) require max_completion_tokens instead of max_tokens
-    token_limit = _max_tokens_for_content(blocks)
+    token_limit = _max_tokens_for_content(content)
     if _is_openai_reasoning_model(resolved_model):
         token_kwargs = {"max_completion_tokens": token_limit}
     else:
@@ -225,7 +203,7 @@ def call_openai(content, api_key, model=""):
 
     response = client.chat.completions.create(
         model=resolved_model,
-        messages=[{"role": "user", "content": _format_openai(blocks)}],
+        messages=[{"role": "user", "content": _format_openai(content)}],
         **token_kwargs,
     )
     if not response.choices or not response.choices[0].message.content:
@@ -241,12 +219,11 @@ def call_gemini(content, api_key, model=""):
     """Call Google Gemini API with text or vision content."""
     import google.generativeai as genai
 
-    blocks = _normalize_content(content)
     with _gemini_lock:
         genai.configure(api_key=api_key)
         genai_model = genai.GenerativeModel(model or DEFAULT_MODELS["gemini"])
         response = genai_model.generate_content(
-            _format_gemini(blocks),
+            _format_gemini(content),
             request_options={"timeout": AI_CALL_TIMEOUT},
         )
     usage = {"input_tokens": 0, "output_tokens": 0}

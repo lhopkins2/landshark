@@ -2,7 +2,6 @@ import io
 import re
 from pathlib import Path
 
-# Vision pipeline constants
 IMAGE_DPI = 120
 MAX_PAGES_REDUCED = 120
 
@@ -33,23 +32,21 @@ def _extract_pdf_text(file_field):
 
     doc = pymupdf.open(stream=data, filetype="pdf")
 
-    # First pass: try normal text extraction
     text_parts = []
     total_meaningful_chars = 0
     for i, page in enumerate(doc):
         text = page.get_text()
         text_parts.append(f"--- Page {i + 1} ---\n{text}")
-        # Count chars excluding whitespace, short lines, URLs, and page indicators
         for line in text.split("\n"):
             stripped = line.strip()
             if len(stripped) <= 20:
                 continue
-            # Skip browser chrome: URLs, page indicators, timestamps
+            # Skip browser chrome: URLs, page indicators, timestamps.
             if re.search(r"https?://|\.com|\.aspx|\.pdf|\d+\s+of\s+\d+", stripped, re.IGNORECASE):
                 continue
             total_meaningful_chars += len(stripped)
 
-    # Note: OCR fallback removed — vision-based analysis handles scanned PDFs
+    # No OCR fallback here — vision-based analysis handles scanned PDFs
     # directly via page images sent to the AI model.
 
     doc.close()
@@ -92,15 +89,13 @@ def _extract_table_rows(table):
     """Extract rows from a table, recursing into nested tables in cells."""
     rows = []
     for row in table.rows:
-        # Check if any cell contains a nested table
         has_nested = any(cell.tables for cell in row.cells)
         if has_nested:
-            # Recurse into nested tables found in this row's cells
             for cell in row.cells:
                 for nested_table in cell.tables:
                     rows.extend(_extract_table_rows(nested_table))
         else:
-            # Deduplicate merged cells: adjacent cells with identical text
+            # Deduplicate merged cells: adjacent cells with identical text.
             seen = []
             for cell in row.cells:
                 text = cell.text.strip().replace("\n", " ")

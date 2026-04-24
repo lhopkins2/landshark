@@ -58,7 +58,6 @@ class EnterpriseOrgListCreateView(generics.ListCreateAPIView):
         serializer = EnterpriseOrgCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         org = serializer.save()
-        # Return the org with member_count annotation
         org_with_count = Organization.objects.annotate(member_count=Count("memberships")).get(pk=org.pk)
         return Response(EnterpriseOrgListSerializer(org_with_count).data, status=status.HTTP_201_CREATED)
 
@@ -99,7 +98,6 @@ class EnterpriseApiUsageView(APIView):
         now = timezone.now()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        # Per-org usage this month
         org_usage = (
             COTAnalysis.objects.filter(
                 created_at__gte=month_start,

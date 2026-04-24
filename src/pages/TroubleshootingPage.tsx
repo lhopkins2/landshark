@@ -62,7 +62,6 @@ function AnalysisDebugCard({ analysis }: { analysis: COTAnalysis }) {
       border: "1px solid var(--ls-border)", borderRadius: "var(--ls-radius-lg)",
       backgroundColor: "var(--ls-surface)", overflow: "hidden",
     }}>
-      {/* Header — always visible */}
       <div
         onClick={() => setExpanded(!expanded)}
         style={{
@@ -87,10 +86,8 @@ function AnalysisDebugCard({ analysis }: { analysis: COTAnalysis }) {
         <StatusBadge status={analysis.status} />
       </div>
 
-      {/* Expanded debug content */}
       {expanded && (
         <div style={{ borderTop: "1px solid var(--ls-border)", padding: "var(--ls-space-md) var(--ls-space-lg)" }}>
-          {/* Metadata grid */}
           <div style={{
             display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
             gap: "var(--ls-space-sm)", marginBottom: "var(--ls-space-md)",
@@ -106,7 +103,6 @@ function AnalysisDebugCard({ analysis }: { analysis: COTAnalysis }) {
             <MetaField label="Created" value={new Date(analysis.created_at).toLocaleString()} />
           </div>
 
-          {/* Tabs */}
           <div style={{ display: "flex", gap: "var(--ls-space-xs)", marginBottom: "var(--ls-space-md)" }}>
             <TabBtn active={activeTab === "prompt"} onClick={() => setActiveTab("prompt")}>Full Prompt</TabBtn>
             <TabBtn active={activeTab === "result"} onClick={() => setActiveTab("result")}>AI Result</TabBtn>
@@ -115,7 +111,6 @@ function AnalysisDebugCard({ analysis }: { analysis: COTAnalysis }) {
             )}
           </div>
 
-          {/* Tab content */}
           {isLoading ? (
             <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)", padding: "var(--ls-space-lg)", justifyContent: "center" }}>
               <Loader size={16} className="spin" />

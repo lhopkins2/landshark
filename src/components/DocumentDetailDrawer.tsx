@@ -29,7 +29,6 @@ export default function DocumentDetailDrawer({ document: doc, onClose }: Documen
     <>
       <div className="doc-drawer-backdrop" onClick={onClose} />
       <div className={`doc-drawer ${showPreview ? "preview-active" : ""}`}>
-        {/* Header */}
         <div className="doc-drawer-header" style={{ flexDirection: "column", alignItems: "stretch", gap: "var(--ls-space-sm)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)" }}>
             <div style={{ minWidth: 0, flex: 1 }}>
@@ -86,15 +85,12 @@ export default function DocumentDetailDrawer({ document: doc, onClose }: Documen
           </button>
         </div>
 
-        {/* Body — two layouts depending on preview state */}
         {showPreview ? (
           <div className="doc-drawer-preview-layout">
-            {/* Sidebar with info + history */}
             <div className="doc-drawer-sidebar">
               <DocumentInfo doc={doc} />
               <AnalysisHistory analyses={analyses} loading={analysesLoading} navigate={navigate} />
             </div>
-            {/* Preview panel */}
             <div className="doc-drawer-preview-panel">
               <div className="doc-drawer-preview-header">
                 <span style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>

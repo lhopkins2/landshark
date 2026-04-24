@@ -148,7 +148,6 @@ export default function DocumentsPage() {
     }
   };
 
-  // Upload files dropped from OS
   const uploadFiles = useCallback(async (files: FileList, folderId: string | null) => {
     for (const file of Array.from(files)) {
       const formData = new FormData();
@@ -162,7 +161,7 @@ export default function DocumentsPage() {
 
   const isFileDrag = (e: DragEvent) => e.dataTransfer.types.includes("Files");
 
-  // Folder drop: handle both document-move and file-upload
+  // Folder drop accepts both OS file uploads and in-app document moves.
   const handleFolderDropCombined = (e: DragEvent, folderId: string | null) => {
     e.preventDefault();
     e.stopPropagation();
@@ -177,7 +176,6 @@ export default function DocumentsPage() {
     }
   };
 
-  // Page-level drop zone for uploading to current folder
   const handlePageDragEnter = (e: DragEvent) => {
     e.preventDefault();
     if (isFileDrag(e)) { dragCounter.current++; setDragOverPage(true); }
@@ -213,7 +211,6 @@ export default function DocumentsPage() {
     }
   };
 
-  // Drag and drop handlers for moving docs into folders
   const handleDragStart = (e: DragEvent, docId: string) => {
     const ids = selectedIds.has(docId) ? [...selectedIds] : [docId];
     e.dataTransfer.setData("application/json", JSON.stringify(ids));
@@ -234,7 +231,6 @@ export default function DocumentsPage() {
       onDrop={handlePageDrop}
       style={{ position: "relative" }}
     >
-      {/* Page-level drop overlay */}
       {dragOverPage && (
         <div style={{
           position: "fixed", inset: 0, zIndex: 50,
@@ -297,7 +293,6 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* New Folder Inline Form */}
       {showNewFolder && (
         <NewFolderForm
           isPending={createFolderMutation.isPending}
@@ -319,7 +314,6 @@ export default function DocumentsPage() {
         />
       )}
 
-      {/* Folder breadcrumb / navigation */}
       {currentFolderId && currentFolder && (
         <div style={{
           display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
@@ -374,7 +368,6 @@ export default function DocumentsPage() {
         </div>
       )}
 
-      {/* Rename Folder Modal */}
       {editingFolder && (
         <RenameFolderModal
           folder={editingFolder}
@@ -384,7 +377,6 @@ export default function DocumentsPage() {
         />
       )}
 
-      {/* Search */}
       <div style={{ display: "flex", gap: "var(--ls-space-sm)", marginBottom: "var(--ls-space-lg)", alignItems: "center" }}>
         {documents.length > 0 && (
           <input
@@ -446,7 +438,6 @@ export default function DocumentsPage() {
           >
             <Archive size={13} /> {isExporting ? "Zipping..." : "Download as Zip"}
           </button>
-          {/* Move to folder dropdown */}
           <MoveToFolderButton
             folders={folders}
             currentFolderId={currentFolderId}
@@ -479,7 +470,6 @@ export default function DocumentsPage() {
         </div>
       )}
 
-      {/* Edit Modal */}
       {editingDoc && (
         <DocMetadataModal
           title="Edit Document"
@@ -493,7 +483,6 @@ export default function DocumentsPage() {
         />
       )}
 
-      {/* Bulk Edit Modal */}
       {showBulkEdit && (
         <DocMetadataModal
           title={`Edit ${selectedIds.size} Document${selectedIds.size !== 1 ? "s" : ""}`}
@@ -513,7 +502,6 @@ export default function DocumentsPage() {
         />
       )}
 
-      {/* Folder grid (only at root level) */}
       {!currentFolderId && folders.length > 0 && !search && (
         <div style={{ marginBottom: "var(--ls-space-lg)" }}>
           <div style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--ls-space-sm)" }}>
@@ -553,7 +541,6 @@ export default function DocumentsPage() {
         </div>
       )}
 
-      {/* Unfiled documents label */}
       {!currentFolderId && folders.length > 0 && !search && (
         <div
           onDrop={(e) => handleFolderDropCombined(e, null)}
@@ -564,7 +551,6 @@ export default function DocumentsPage() {
         </div>
       )}
 
-      {/* Document list */}
       {(currentFolderId ? isLoading : isLoadingUnfiled) ? (
         <p style={{ color: "var(--ls-text-muted)" }}>Loading...</p>
       ) : documents.length === 0 && (!folders.length || currentFolderId || search) ? (
@@ -598,7 +584,6 @@ export default function DocumentsPage() {
         </div>
       )}
 
-      {/* Document Detail Drawer */}
       {detailDoc && (
         <DocumentDetailDrawer
           document={detailDoc}
@@ -606,7 +591,6 @@ export default function DocumentsPage() {
         />
       )}
 
-      {/* Delete confirmation modal */}
       {showDeleteConfirm && (
         <div
           onClick={() => setShowDeleteConfirm(false)}

@@ -1,4 +1,4 @@
-export interface ParsedResultText {
+interface ParsedResultText {
   headerFields: Record<string, string>;
   headers: string[];
   rows: string[][];

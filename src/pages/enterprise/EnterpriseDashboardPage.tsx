@@ -34,7 +34,6 @@ export default function EnterpriseDashboardPage() {
         </p>
       </div>
 
-      {/* Stats cards */}
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
@@ -52,7 +51,6 @@ export default function EnterpriseDashboardPage() {
         gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))",
         gap: "var(--ls-space-lg)",
       }}>
-        {/* Recent orgs */}
         <div style={{
           backgroundColor: "var(--ls-surface)",
           border: "1px solid var(--ls-border)",
@@ -76,7 +74,6 @@ export default function EnterpriseDashboardPage() {
           )}
         </div>
 
-        {/* API Usage */}
         <div style={{
           backgroundColor: "var(--ls-surface)",
           border: "1px solid var(--ls-border)",
@@ -90,7 +87,6 @@ export default function EnterpriseDashboardPage() {
             </h3>
           </div>
 
-          {/* Platform totals */}
           {apiUsage?.platform_totals && (
             <div style={{
               display: "grid", gridTemplateColumns: "1fr 1fr 1fr",
@@ -114,7 +110,6 @@ export default function EnterpriseDashboardPage() {
             </div>
           )}
 
-          {/* Per-org breakdown */}
           {!apiUsage?.organizations?.length ? (
             <p style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)" }}>No usage this month</p>
           ) : (

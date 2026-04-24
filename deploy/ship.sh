@@ -13,10 +13,8 @@ DEPLOY_CMD="bash /opt/landshark/deploy/deploy.sh"
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Stage all changes
 git add -A
 
-# Check if there's anything to commit
 if git diff --cached --quiet; then
   echo "No changes to commit — deploying latest pushed code."
 else
@@ -25,11 +23,9 @@ else
   echo "Committed: $MSG"
 fi
 
-# Push
 echo "Pushing to origin..."
 git push origin main
 
-# Deploy
 echo "Deploying to VPS..."
 ssh -i "$SSH_KEY" "$SERVER" "$DEPLOY_CMD"
 

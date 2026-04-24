@@ -79,7 +79,6 @@ export default function Sidebar() {
         overflow: "hidden",
       }}
     >
-      {/* Logo */}
       <div
         style={{
           padding: "var(--ls-space-md) var(--ls-space-lg)",
@@ -121,7 +120,6 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Navigation */}
       <nav style={{ flex: 1 }}>
         {renderNavItems(navItems, true)}
 
@@ -140,7 +138,6 @@ export default function Sidebar() {
         )}
       </nav>
 
-      {/* Collapse toggle */}
       <button
         onClick={toggleCollapsed}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}

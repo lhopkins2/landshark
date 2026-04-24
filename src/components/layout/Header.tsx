@@ -21,7 +21,6 @@ export default function Header() {
         gap: "var(--ls-space-md)",
       }}
     >
-      {/* Sidebar toggle */}
       <button
         onClick={toggleCollapsed}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -40,7 +39,6 @@ export default function Header() {
         {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
       </button>
 
-      {/* Theme toggle */}
       <button
         onClick={toggleTheme}
         title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
@@ -58,7 +56,6 @@ export default function Header() {
         {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
       </button>
 
-      {/* User info */}
       {user && (
         <div style={{ textAlign: "right", lineHeight: 1.3 }}>
           <div style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)" }}>
@@ -72,7 +69,6 @@ export default function Header() {
         </div>
       )}
 
-      {/* Logout */}
       <button
         onClick={logout}
         title="Logout"

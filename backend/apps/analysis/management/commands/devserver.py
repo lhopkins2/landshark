@@ -37,7 +37,6 @@ class Command(BaseCommand):
         if not is_reloader_child:
             self._start_worker()
 
-        # Delegate to runserver with the same arguments
         runserver_args = [options["addrport"]]
         runserver_kwargs = {}
         if options["noreload"]:
@@ -109,7 +108,6 @@ class Command(BaseCommand):
                 time.sleep(10)
                 p = worker[0]
                 if p.poll() is None:
-                    # Worker is healthy — reset failure counter
                     consecutive_failures = 0
                     continue
 

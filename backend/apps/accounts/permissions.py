@@ -23,15 +23,6 @@ class IsOrgAdmin(BasePermission):
         return membership.role == "admin"
 
 
-class IsOrgMember(BasePermission):
-    """Allows access to any org member (admin or operator, in an active org) and developers."""
-
-    def has_permission(self, request, view):
-        if getattr(request.user, "is_developer", False):
-            return True
-        return _get_active_membership(request.user) is not None
-
-
 class IsEnterprise(BasePermission):
     """Allows access only to users with is_developer=True."""
 

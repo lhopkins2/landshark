@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.core.models import TimestampedModel
@@ -84,3 +85,24 @@ class Document(TimestampedModel):
 
     def __str__(self):
         return self.original_filename
+
+
+def org_scoped_documents(user, base_qs=None):
+    """Return a Document queryset scoped to the user's organization.
+
+    Developers see everything. Users with no membership see nothing.
+    Everyone else sees documents whose chain-of-title belongs to their org,
+    plus unassigned documents uploaded by a member of their org.
+    """
+    if base_qs is None:
+        base_qs = Document.objects.all()
+    if getattr(user, "is_developer", False):
+        return base_qs
+    membership = getattr(user, "membership", None)
+    if not membership:
+        return base_qs.none()
+    org = membership.organization
+    return base_qs.filter(
+        Q(chain_of_title__project__client__organization=org)
+        | Q(chain_of_title__isnull=True, uploaded_by__membership__organization=org)
+    )

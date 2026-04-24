@@ -23,7 +23,6 @@ class AuditLogListView(generics.ListAPIView):
             else:
                 return qs.none()
 
-        # Filters
         action = self.request.query_params.get("action")
         if action:
             qs = qs.filter(action=action)

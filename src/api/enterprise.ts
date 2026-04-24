@@ -1,7 +1,7 @@
 import apiClient from "./client";
 import type { PaginatedResponse } from "../types/models";
 
-export interface EnterpriseStats {
+interface EnterpriseStats {
   total_organizations: number;
   active_organizations: number;
   total_users: number;
@@ -39,7 +39,7 @@ export interface OrgTokenUsage {
   total_tokens: number;
 }
 
-export interface ApiUsageResponse {
+interface ApiUsageResponse {
   period: string;
   platform_totals: {
     analysis_count: number;

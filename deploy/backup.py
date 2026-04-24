@@ -22,9 +22,6 @@ from urllib.parse import urlparse
 
 import boto3
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 ENV_FILE = os.environ.get("BACKUP_ENV_FILE", "/opt/landshark/.env")
 STATUS_FILE = Path(os.environ.get("BACKUP_STATUS_FILE", "/var/log/landshark/backup-status.json"))
 MEDIA_ROOT = Path("/opt/landshark/backend/media")
@@ -40,9 +37,6 @@ logging.basicConfig(
 log = logging.getLogger("backup")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 def load_env(path):
     """Parse a .env file into a dict (simple key=value, ignores comments)."""
     env = {}
@@ -98,9 +92,6 @@ def write_status(success, details):
         log.error("Failed to write status file: %s", e)
 
 
-# ---------------------------------------------------------------------------
-# Backup steps
-# ---------------------------------------------------------------------------
 def backup_database(client, bucket, env):
     """pg_dump → gzip → upload to backup bucket."""
     db = parse_database_url(env.get("DATABASE_URL", ""))
@@ -116,7 +107,6 @@ def backup_database(client, bucket, env):
         tmp_path = tmp.name
 
     try:
-        # pg_dump → gzip → temp file
         pg_dump = subprocess.Popen(
             [
                 "pg_dump",
@@ -161,7 +151,6 @@ def sync_media_local(client, bucket):
         log.info("No local media directory at %s — skipping media sync.", MEDIA_ROOT)
         return 0
 
-    # List existing remote objects for comparison
     remote_objects = {}
     paginator = client.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=MEDIA_PREFIX):
@@ -176,7 +165,6 @@ def sync_media_local(client, bucket):
         remote_key = f"{MEDIA_PREFIX}{relative}"
         local_size = local_path.stat().st_size
 
-        # Skip if remote has same key and size
         if remote_key in remote_objects and remote_objects[remote_key] == local_size:
             continue
 
@@ -197,19 +185,16 @@ def sync_media_spaces(client, bucket, env):
         log.warning("DO_SPACES_BUCKET not set — cannot sync from primary Spaces.")
         return 0
 
-    # List objects in primary bucket
     primary_objects = {}
     paginator = primary.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=primary_bucket):
         for obj in page.get("Contents", []):
             primary_objects[obj["Key"]] = obj["Size"]
 
-    # List objects in backup bucket media/ prefix
     backup_objects = {}
     backup_paginator = client.get_paginator("list_objects_v2")
     for page in backup_paginator.paginate(Bucket=bucket, Prefix=MEDIA_PREFIX):
         for obj in page.get("Contents", []):
-            # Strip prefix for comparison
             backup_objects[obj["Key"]] = obj["Size"]
 
     uploaded = 0
@@ -219,7 +204,7 @@ def sync_media_spaces(client, bucket, env):
             continue
 
         log.info("Copying %s → %s (%d bytes)", key, backup_key, size)
-        # Download from primary, upload to backup (cross-region, can't server-side copy)
+        # Cross-region: no server-side copy, so stream through a local temp file.
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp_path = tmp.name
         try:
@@ -251,9 +236,6 @@ def prune_old_backups(client, bucket):
     return pruned
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
     log.info("=" * 50)
     log.info("LandShark Backup starting")
@@ -261,7 +243,6 @@ def main():
 
     env = load_env(ENV_FILE)
 
-    # Validate required backup credentials
     backup_key = env.get("BACKUP_SPACES_KEY", "")
     backup_bucket = env.get("BACKUP_SPACES_BUCKET", "landshark-backups")
     if not backup_key:
@@ -273,7 +254,6 @@ def main():
     client = get_s3_client(env, prefix="BACKUP_SPACES")
     details = {}
 
-    # Step 1: Database backup
     log.info("[1/3] Backing up database...")
     db_url = env.get("DATABASE_URL", "")
     if db_url:
@@ -284,7 +264,6 @@ def main():
         log.warning("DATABASE_URL not set — skipping database backup.")
         details["db_dump"] = None
 
-    # Step 2: Media sync
     log.info("[2/3] Syncing media files...")
     primary_spaces_key = env.get("DO_SPACES_KEY", "")
     if primary_spaces_key:
@@ -295,7 +274,6 @@ def main():
         details["media_source"] = "local"
     details["media_files_uploaded"] = files_synced
 
-    # Step 3: Prune old backups
     log.info("[3/3] Pruning old backups...")
     pruned = prune_old_backups(client, backup_bucket)
     details["pruned_count"] = pruned

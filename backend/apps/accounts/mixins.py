@@ -1,6 +1,15 @@
 _NO_ORG = object()  # sentinel: user has no org (should see nothing)
 
 
+def get_user_organization(user):
+    """Return the user's organization, or None if they have no membership."""
+    from .models import Membership
+    try:
+        return user.membership.organization
+    except Membership.DoesNotExist:
+        return None
+
+
 class OrgScopedViewMixin:
     """Mixin that filters querysets to the user's organization."""
 

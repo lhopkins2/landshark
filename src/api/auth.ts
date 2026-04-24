@@ -1,18 +1,18 @@
 import apiClient from "./client";
 import type { AuthUser } from "../types/models";
 
-export interface LoginRequest {
+interface LoginRequest {
   email: string;
   password: string;
 }
 
-export interface LoginResponse {
+interface LoginResponse {
   access: string;
   refresh: string;
   user: AuthUser;
 }
 
-export interface TokenResponse {
+interface TokenResponse {
   access: string;
   refresh: string;
 }

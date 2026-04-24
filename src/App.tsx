@@ -3,6 +3,8 @@ import { useAuthStore, selectCanManageUsers, selectIsDeveloper } from "./stores/
 import AppLayout from "./components/layout/AppLayout";
 import EnterpriseLayout from "./components/layout/EnterpriseLayout";
 import LoginPage from "./pages/LoginPage";
+import LandingPage from "./pages/landing/LandingPage";
+import PricingPage from "./pages/landing/PricingPage";
 import DashboardPage from "./pages/DashboardPage";
 import ChainOfTitlePage from "./pages/ChainOfTitlePage";
 import DocumentsPage from "./pages/DocumentsPage";
@@ -56,6 +58,8 @@ function EnterpriseRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <Routes>
+      <Route path="/home" element={<LandingPage />} />
+      <Route path="/pricing" element={<PricingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route
         path="/"
@@ -75,7 +79,6 @@ export default function App() {
         <Route path="troubleshooting" element={<DeveloperRoute><TroubleshootingPage /></DeveloperRoute>} />
       </Route>
 
-      {/* Enterprise routes */}
       <Route path="/enterprise/login" element={<EnterpriseLoginPage />} />
       <Route
         path="/enterprise"

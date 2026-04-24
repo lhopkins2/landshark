@@ -54,7 +54,6 @@ export default function LoginPage() {
           boxShadow: "var(--ls-shadow-lg)",
         }}
       >
-        {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: "var(--ls-space-xl)" }}>
           <h1
             style={{

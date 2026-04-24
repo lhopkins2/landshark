@@ -38,7 +38,6 @@ def generate_docx(text: str, title: str = "") -> io.BytesIO:
         elif stripped.startswith("# "):
             doc.add_heading(stripped[2:], level=1)
         elif _is_table_row(stripped):
-            # Collect all consecutive table rows
             table_rows: list[list[str]] = []
             while i < len(lines):
                 row_stripped = lines[i].strip()
@@ -50,11 +49,9 @@ def generate_docx(text: str, title: str = "") -> io.BytesIO:
                     i += 1
                     continue
                 break
-            # Render as a proper Word table
             if table_rows:
                 num_cols = len(table_rows[0])
                 table = doc.add_table(rows=len(table_rows), cols=num_cols, style="Table Grid")
-                # Narrow page-number columns
                 for col_idx, header in enumerate(table_rows[0]):
                     if _is_page_col(header):
                         table.columns[col_idx].width = Inches(0.55)
@@ -66,7 +63,6 @@ def generate_docx(text: str, title: str = "") -> io.BytesIO:
                             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             for run in paragraph.runs:
                                 run.font.size = Pt(9)
-                    # Bold the header row
                     if row_idx == 0:
                         for col_idx in range(num_cols):
                             for run in table.cell(0, col_idx).paragraphs[0].runs:
@@ -133,7 +129,6 @@ def _render_pdf_table(pdf: FPDF, rows: list[list[str]]) -> None:
     heading_style = FontFace(emphasis="BOLD", size_pt=8)
     pdf.set_font("DejaVu", "", 8)
 
-    # Compute column widths — narrow for page-number columns
     table_width = pdf.epw  # effective page width (minus margins)
     col_widths = _compute_col_widths(rows[0], table_width) if num_cols > 0 else None
 
@@ -147,7 +142,6 @@ def _render_pdf_table(pdf: FPDF, rows: list[list[str]]) -> None:
     ) as table:
         for row_data in rows:
             row = table.row()
-            # Pad or truncate to match header column count
             padded = row_data[:num_cols] + [""] * max(0, num_cols - len(row_data))
             for cell_text in padded:
                 row.cell(cell_text, align="LEFT")
@@ -191,7 +185,6 @@ def generate_pdf(text: str, title: str = "") -> io.BytesIO:
             pdf.cell(0, 10, stripped[2:], new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("DejaVu", "", 10)
         elif _is_table_row(stripped):
-            # Collect all consecutive table rows
             table_rows: list[list[str]] = []
             while i < len(lines):
                 row_stripped = lines[i].strip()
@@ -206,10 +199,9 @@ def generate_pdf(text: str, title: str = "") -> io.BytesIO:
             try:
                 _render_pdf_table(pdf, table_rows)
             except Exception:
-                # Fallback: render table rows as plain text if table rendering fails
                 for row_data in table_rows:
                     pdf.multi_cell(0, 5, " | ".join(row_data), new_x="LMARGIN", new_y="NEXT")
-            continue  # skip the i += 1 at the bottom
+            continue
         else:
             pdf.multi_cell(0, 5, stripped, new_x="LMARGIN", new_y="NEXT")
 
@@ -225,12 +217,6 @@ def generate_document(text: str, output_format: str, title: str = "") -> io.Byte
     if output_format == "docx":
         return generate_docx(text, title)
     return generate_pdf(text, title)
-
-
-# ---------------------------------------------------------------------------
-# Template-based DOCX generation: clones the original template and injects
-# only the AI-generated data rows into the existing table structure.
-# ---------------------------------------------------------------------------
 
 
 def _extract_data_rows_from_ai_text(text: str) -> list[list[str]]:
@@ -323,11 +309,10 @@ def _set_cell_text_preserving_format(tc_elem, text: str):
 
     p = paragraphs[0]
 
-    # Remove extra paragraphs (keep only the first)
     for extra_p in paragraphs[1:]:
         tc_elem.remove(extra_p)
 
-    # Grab run-level properties from the first existing run (font, size, etc.)
+    # Preserve run-level formatting (font, size, etc.) from the first existing run.
     existing_runs = p.findall(qn("w:r"))
     run_props_copy = None
     if existing_runs:
@@ -335,11 +320,9 @@ def _set_cell_text_preserving_format(tc_elem, text: str):
         if existing_run_props is not None:
             run_props_copy = deepcopy(existing_run_props)
 
-    # Clear all runs
     for run in existing_runs:
         p.remove(run)
 
-    # Build a new run with the preserved formatting
     from lxml import etree
 
     r = etree.SubElement(p, qn("w:r"))
@@ -381,19 +364,16 @@ def _fill_header_fields_in_doc(doc: DocxDocument, fields: dict[str, str]):
     if not fields:
         return
 
-    # Normalise keys for fuzzy matching
     normalised = {k.upper().strip().rstrip(":"): v for k, v in fields.items()}
 
-    # Pattern 1: paragraphs
+    # Pattern 1: paragraphs matching "LABEL:___" or "LABEL:   "
     for para in doc.paragraphs:
         for key, value in normalised.items():
-            # e.g. "TAX ID #:___" or "TAX ID #:   "
             pattern = re.compile(
                 re.escape(key) + r"\s*:\s*[_\s]*$",
                 re.IGNORECASE,
             )
             if pattern.search(para.text):
-                # Replace underscores/blanks after the colon with the value
                 para.text = re.sub(
                     re.escape(key) + r"(\s*:\s*)[_\s]*$",
                     key + r"\1" + value,
@@ -401,8 +381,7 @@ def _fill_header_fields_in_doc(doc: DocxDocument, fields: dict[str, str]):
                     flags=re.IGNORECASE,
                 )
 
-    # Pattern 2: table cells (label cell followed by empty value cell)
-    # Search all tables including nested ones
+    # Pattern 2: table cells — label cell followed by empty value cell (including nested tables).
     all_tables = _collect_all_tables(doc)
     for table in all_tables:
         for row in table.rows:
@@ -411,7 +390,7 @@ def _fill_header_fields_in_doc(doc: DocxDocument, fields: dict[str, str]):
                 cell_text = cell.text.strip().rstrip(":").upper()
                 if cell_text in normalised and i + 1 < len(cells):
                     next_cell = cells[i + 1]
-                    # Only fill if the value cell is blank or underscores
+                    # Only fill cells that are blank or underscore placeholders.
                     if not next_cell.text.strip() or next_cell.text.strip("_ ") == "":
                         next_cell.text = normalised[cell_text]
 
@@ -422,22 +401,18 @@ def generate_from_docx_template(template_file_field, ai_text: str) -> io.BytesIO
     Preserves all images, formatting, headers, and layout from the template.
     Only adds new data rows to the existing table structure.
     """
-    # Read the template file
     template_file_field.open("rb")
     data = template_file_field.read()
     template_file_field.close()
 
     doc = DocxDocument(io.BytesIO(data))
 
-    # Parse AI data rows from markdown output
     data_rows = _extract_data_rows_from_ai_text(ai_text)
 
-    # Try to fill header fields (TAX ID #, TRACT #, etc.)
     header_fields = _extract_header_fields_from_ai_text(ai_text)
     _fill_header_fields_in_doc(doc, header_fields)
 
     if not data_rows:
-        # No table data — return the template with header fields filled
         buf = io.BytesIO()
         doc.save(buf)
         buf.seek(0)
@@ -445,26 +420,22 @@ def generate_from_docx_template(template_file_field, ai_text: str) -> io.BytesIO
 
     target_table = _find_data_table(doc)
     if not target_table:
-        # No table in template — fall back to from-scratch generation
+        # Fall back to from-scratch generation when the template has no table.
         return generate_docx(ai_text)
 
-    # Find the column header row (e.g. "Document Caption | Grantor | ...")
-    # Everything at and before this row is kept; rows after are data placeholders.
+    # Everything at and before the column header row is preserved; rows after
+    # it are treated as placeholder data rows and replaced.
     col_header_idx = _find_column_header_row(target_table)
 
-    # Identify the template row (the row we'll clone for formatting)
     tmpl_row_idx = _get_template_row(target_table, col_header_idx)
     template_tr = deepcopy(target_table.rows[tmpl_row_idx]._tr)
 
-    # Remove all rows AFTER the column header row (these are data/placeholder rows).
-    # Keep rows 0..col_header_idx (header fields + column header).
     trs_to_remove = []
     for i in range(col_header_idx + 1, len(target_table.rows)):
         trs_to_remove.append(target_table.rows[i]._tr)
     for tr in trs_to_remove:
         target_table._tbl.remove(tr)
 
-    # Insert each AI data row by cloning the template row
     for row_data in data_rows:
         new_tr = deepcopy(template_tr)
         cells = new_tr.findall(qn("w:tc"))
@@ -473,7 +444,6 @@ def generate_from_docx_template(template_file_field, ai_text: str) -> io.BytesIO
                 _set_cell_text_preserving_format(tc, row_data[i])
             else:
                 _set_cell_text_preserving_format(tc, "")
-        # If AI has more columns than the template, ignore extras
         target_table._tbl.append(new_tr)
 
     buf = io.BytesIO()

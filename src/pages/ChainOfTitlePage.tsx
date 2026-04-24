@@ -18,29 +18,23 @@ export default function ChainOfTitlePage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  // Document selection
   const [docMode, setDocMode] = useState<"existing" | "upload">("existing");
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [docSearch, setDocSearch] = useState("");
   const [browseFolderId, setBrowseFolderId] = useState<string | null>(null);
 
-  // Legal description
   const [legalDescription, setLegalDescription] = useState("");
 
-  // Analysis options
   const [analysisOrder, setAnalysisOrder] = useState<AnalysisOrder>("chronological");
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("pdf");
   const [customRequest, setCustomRequest] = useState("");
 
-  // Result
   const [currentResult, setCurrentResult] = useState<COTAnalysis | null>(null);
 
-  // Progress tracking
   const [pollingAnalysisId, setPollingAnalysisId] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [workerError, setWorkerError] = useState<string | null>(null);
 
-  // Queries
   const docParams: Record<string, string> = {};
   if (docSearch) docParams.search = docSearch;
   if (browseFolderId) docParams.folder = browseFolderId;
@@ -73,7 +67,6 @@ export default function ChainOfTitlePage() {
   const folders = foldersData?.results ?? [];
   const currentBrowseFolder = browseFolderId ? folders.find((f) => f.id === browseFolderId) : null;
 
-  // Check if the default provider has an API key configured
   const defaultProvider = settings?.default_provider || "anthropic";
   const providerKeyMap: Record<string, boolean> = {
     anthropic: !!settings?.anthropic_api_key_display,
@@ -82,7 +75,6 @@ export default function ChainOfTitlePage() {
   };
   const hasApiKey = providerKeyMap[defaultProvider] ?? false;
 
-  // Upload document with metadata popup
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [showUploadMeta, setShowUploadMeta] = useState(false);
   const uploadFileRef = useRef<HTMLInputElement>(null);
@@ -105,7 +97,6 @@ export default function ChainOfTitlePage() {
     },
   });
 
-  // Edit document metadata
   const [editingDoc, setEditingDoc] = useState<Document | null>(null);
   const editDocMutation = useMutation({
     mutationFn: (data: { id: string; tract_number: string; last_record_holder: string }) =>
@@ -139,7 +130,6 @@ export default function ChainOfTitlePage() {
         if (data?.id) {
           setCurrentResult(data as COTAnalysis);
         }
-        // Surface 503 worker-down error clearly
         if (data?.detail) {
           setWorkerError(data.detail);
         }
@@ -176,7 +166,6 @@ export default function ChainOfTitlePage() {
     return () => clearInterval(interval);
   }, [pollingAnalysisId, pollingDone, refetchProgress]);
 
-  // When polling completes, persist the result and refresh lists
   const hasHandledCompletion = useRef(false);
   useEffect(() => {
     if (pollingDone && polledAnalysis && !hasHandledCompletion.current) {
@@ -189,8 +178,7 @@ export default function ChainOfTitlePage() {
     }
   }, [pollingDone, polledAnalysis, queryClient]);
 
-  // On first load, resume polling if an analysis is already in-progress
-  // (handles page refresh mid-analysis)
+  // Resume polling if an analysis is already in-progress (page refresh mid-run).
   const hasResumedRef = useRef(false);
   useEffect(() => {
     if (hasResumedRef.current || pollingAnalysisId || !analyses.length) return;
@@ -214,7 +202,7 @@ export default function ChainOfTitlePage() {
         setElapsedSeconds((s) => s + 1);
       }
     }
-    tick(); // set immediately so we don't wait 1s on resume
+    tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [isAnalyzing, polledAnalysis?.created_at]);
@@ -230,7 +218,6 @@ export default function ChainOfTitlePage() {
         </p>
       </div>
 
-      {/* API Key Warning */}
       {settings && !hasApiKey && (
         <div style={{
           display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
@@ -248,7 +235,6 @@ export default function ChainOfTitlePage() {
         </div>
       )}
 
-      {/* Section 1: Document Selection */}
       <SectionCard title="1. Select Document">
         <div style={{ display: "flex", gap: "var(--ls-space-sm)", marginBottom: "var(--ls-space-md)" }}>
           <TabButton active={docMode === "existing"} onClick={() => setDocMode("existing")}>Select Existing</TabButton>
@@ -257,7 +243,6 @@ export default function ChainOfTitlePage() {
 
         {docMode === "existing" ? (
           <div>
-            {/* Folder breadcrumb */}
             {browseFolderId && currentBrowseFolder && (
               <div style={{
                 display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
@@ -295,7 +280,6 @@ export default function ChainOfTitlePage() {
               />
             </div>
             <div style={{ maxHeight: 280, overflowY: "auto", display: "grid", gap: "var(--ls-space-xs)" }}>
-              {/* Folder tiles (only at root level, not while searching) */}
               {!browseFolderId && !docSearch && folders.map((folder) => (
                 <div
                   key={`folder-${folder.id}`}
@@ -359,7 +343,6 @@ export default function ChainOfTitlePage() {
           </div>
         )}
 
-        {/* Upload metadata popup */}
         {showUploadMeta && uploadFile && (
           <DocMetadataModal
             title="Upload Document"
@@ -375,7 +358,6 @@ export default function ChainOfTitlePage() {
           />
         )}
 
-        {/* Edit document metadata popup */}
         {editingDoc && (
           <DocMetadataModal
             title="Edit Document Details"
@@ -402,7 +384,6 @@ export default function ChainOfTitlePage() {
         )}
       </SectionCard>
 
-      {/* Section 2: Legal Description */}
       <SectionCard title="2. Legal Description">
         <div>
           <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
@@ -426,7 +407,6 @@ export default function ChainOfTitlePage() {
         </div>
       </SectionCard>
 
-      {/* Section 3: Analysis Options */}
       <SectionCard title="3. Analysis Options">
         <div>
           <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
@@ -473,7 +453,6 @@ export default function ChainOfTitlePage() {
         </div>
       </SectionCard>
 
-      {/* Analyze Button + Format Selector */}
       <div style={{ marginBottom: "var(--ls-space-lg)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)" }}>
           <button
@@ -548,7 +527,6 @@ export default function ChainOfTitlePage() {
             </button>
           </div>
         )}
-        {/* Stuck on queued warning — worker likely not running */}
         {isAnalyzing && polledAnalysis?.progress_step === "queued" && elapsedSeconds > 30 && (
           <div style={{
             display: "flex", alignItems: "flex-start", gap: "var(--ls-space-sm)",
@@ -570,7 +548,6 @@ export default function ChainOfTitlePage() {
             </div>
           </div>
         )}
-        {/* Worker error from 503 */}
         {workerError && (
           <div style={{
             display: "flex", alignItems: "flex-start", gap: "var(--ls-space-sm)",
@@ -598,7 +575,6 @@ export default function ChainOfTitlePage() {
         {selectedDocId && !hasApiKey && <HintText>Configure an API key in Settings</HintText>}
       </div>
 
-      {/* Current Result */}
       {(currentResult || (pollingDone && polledAnalysis)) && (
         <SectionCard title="Result" onClose={() => setCurrentResult(null)}>
           <AnalysisResultCard
@@ -608,7 +584,6 @@ export default function ChainOfTitlePage() {
         </SectionCard>
       )}
 
-      {/* Past Analyses */}
       {analyses.length > 0 && (
         <SectionCard title="Past Analyses">
           <div style={{ display: "grid", gap: "var(--ls-space-xs)" }}>
@@ -759,7 +734,6 @@ function AnalysisResultCard({ analysis, onReview }: { analysis: COTAnalysis; onR
         })()}
       </div>
 
-      {/* Generated Document Link */}
       {analysis.generated_document_url && analysis.generated_document_name && (
         <a
           href={analysis.generated_document_url}

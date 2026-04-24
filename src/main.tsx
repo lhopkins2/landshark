@@ -15,7 +15,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// Apply saved theme on load
 const savedTheme = useThemeStore.getState().theme;
 document.documentElement.setAttribute("data-theme", savedTheme);
 

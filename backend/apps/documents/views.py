@@ -1,4 +1,4 @@
-from django.db.models import Count, Q
+from django.db.models import Count
 from django.http import FileResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -9,7 +9,7 @@ from apps.accounts.mixins import OrgScopedViewMixin
 from apps.core.audit import log_action
 from apps.core.models import AuditLog
 
-from .models import Document, DocumentFolder
+from .models import Document, DocumentFolder, org_scoped_documents
 from .serializers import DocumentFolderSerializer, DocumentSerializer, DocumentUploadSerializer
 
 
@@ -33,19 +33,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
     ordering_fields = ["original_filename", "created_at", "file_size"]
 
     def get_queryset(self):
-        qs = super().get_queryset()
-        user = self.request.user
-        if getattr(user, "is_developer", False):
-            pass
-        else:
-            membership = getattr(user, "membership", None)
-            if not membership:
-                return qs.none()
-            org = membership.organization
-            qs = qs.filter(
-                Q(chain_of_title__project__client__organization=org)
-                | Q(chain_of_title__isnull=True, uploaded_by__membership__organization=org)
-            )
+        qs = org_scoped_documents(self.request.user, base_qs=super().get_queryset())
         if self.request.query_params.get("folder__isnull") == "true":
             qs = qs.filter(folder__isnull=True)
         return qs

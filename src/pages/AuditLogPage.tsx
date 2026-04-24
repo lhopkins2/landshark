@@ -40,7 +40,6 @@ export default function AuditLogPage() {
         </p>
       </div>
 
-      {/* Filters */}
       <div style={{ display: "flex", gap: "var(--ls-space-sm)", marginBottom: "var(--ls-space-md)" }}>
         <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
           <Search size={16} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ls-text-muted)" }} />
@@ -83,7 +82,6 @@ export default function AuditLogPage() {
         </select>
       </div>
 
-      {/* Table */}
       <div style={{
         backgroundColor: "var(--ls-surface)",
         border: "1px solid var(--ls-border)",
@@ -112,7 +110,6 @@ export default function AuditLogPage() {
         </table>
       </div>
 
-      {/* Pagination */}
       {data && (data.next || data.previous) && (
         <div style={{ display: "flex", justifyContent: "center", gap: "var(--ls-space-sm)", marginTop: "var(--ls-space-md)" }}>
           <button

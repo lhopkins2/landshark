@@ -63,7 +63,7 @@ export const analysesApi = {
     apiClient.get<{ worker_running: boolean; stale_count: number }>("/analysis/worker-health/"),
 };
 
-export interface DashboardStats {
+interface DashboardStats {
   total_documents: number;
   analyses_this_month: number;
   pending_analyses: number;

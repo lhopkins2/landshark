@@ -1,61 +1,3 @@
-export interface Client {
-  id: string;
-  name: string;
-  client_type: ClientType;
-  primary_contact_name: string;
-  primary_contact_email: string;
-  primary_contact_phone: string;
-  city: string;
-  state: string;
-  zip_code: string;
-  is_active: boolean;
-  notes: string;
-  projects?: Project[];
-  created_at: string;
-  updated_at: string;
-}
-
-export type ClientType =
-  | "law_firm"
-  | "lender"
-  | "real_estate_agency"
-  | "individual"
-  | "other";
-
-export interface Project {
-  id: string;
-  client: string;
-  client_name?: string;
-  name: string;
-  reference_number: string;
-  status: ProjectStatus;
-  description: string;
-  notes: string;
-  chains_of_title?: ChainOfTitle[];
-  created_at: string;
-  updated_at: string;
-}
-
-export type ProjectStatus = "active" | "completed" | "on_hold" | "cancelled";
-
-export interface ChainOfTitle {
-  id: string;
-  project: string;
-  project_name?: string;
-  property_address: string;
-  county: string;
-  state: string;
-  parcel_number: string;
-  legal_description: string;
-  status: ChainStatus;
-  notes: string;
-  documents?: Document[];
-  created_at: string;
-  updated_at: string;
-}
-
-export type ChainStatus = "pending" | "in_progress" | "complete";
-
 export interface DocumentFolder {
   id: string;
   name: string;
@@ -119,12 +61,12 @@ export interface UserAnalysisSettings {
   updated_at: string;
 }
 
-export type AnalysisStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
+type AnalysisStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
 export type AnalysisOrder = "chronological" | "reverse_chronological";
 
 export type OutputFormat = "pdf" | "docx";
 
-export type AnalysisProgressStep =
+type AnalysisProgressStep =
   | "queued"
   | "extracting_text"
   | "building_prompt"
