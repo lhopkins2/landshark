@@ -9,6 +9,26 @@ APP_DIR="/opt/landshark"
 VENV="$APP_DIR/venv"
 FRONTEND_DIR="/var/www/landshark/frontend"
 
+# ---------------------------------------------------------------------------
+# Ensure swap exists — prevents OOM kills during AI analysis on low-RAM hosts.
+# Idempotent: skips creation if /swapfile already exists.
+# ---------------------------------------------------------------------------
+if [ ! -f /swapfile ]; then
+  echo "==> Creating 4GB swap file..."
+  fallocate -l 4G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  # Persist across reboots
+  if ! grep -q '/swapfile' /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
+  echo "    Swap created and enabled."
+else
+  # Make sure it's active (e.g. after a reboot that didn't mount it yet)
+  swapon /swapfile 2>/dev/null || true
+fi
+
 # Ensure git trusts the repo directory
 git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
 
