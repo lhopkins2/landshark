@@ -1,12 +1,12 @@
 """Gunicorn configuration for LandShark production."""
 
-import multiprocessing
-
 # Bind to localhost — Nginx handles external traffic
 bind = "127.0.0.1:8001"
 
-# Workers: 2x CPU cores + 1 (on a 1-vCPU droplet, this = 3)
-workers = multiprocessing.cpu_count() * 2 + 1
+# Fixed at 2 workers. The cpu*2+1 formula yields 3 on a 1-vCPU droplet,
+# but each gunicorn worker holds ~200MB, and we share a 1.9GB server with
+# qcluster. 2 workers is the right balance for memory-constrained deploys.
+workers = 2
 
 # Timeout for long-running requests (AI analysis can be slow)
 timeout = 120

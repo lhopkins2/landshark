@@ -2,8 +2,12 @@ import io
 import re
 from pathlib import Path
 
-IMAGE_DPI = 120
-MAX_PAGES_REDUCED = 120
+# Lower DPI and page cap reduce peak memory usage during PDF rendering.
+# At 100 DPI a US-Letter page is ~720×936px — plenty of detail for vision models.
+# 40 pages covers the vast majority of title chain documents; beyond that the AI
+# context window is the real limiting factor anyway.
+IMAGE_DPI = 100
+MAX_PAGES_REDUCED = 40
 
 
 def extract_text_from_file(file_field):
