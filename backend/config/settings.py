@@ -225,9 +225,8 @@ if not DEBUG:
     SECURE_HSTS_PRELOAD = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    # Nginx handles SSL termination and sets X-Forwarded-Proto
+    # Nginx terminates SSL and sets X-Forwarded-Proto; it also owns the HTTP→HTTPS redirect.
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    # Let Nginx handle HTTP→HTTPS redirect
     SECURE_SSL_REDIRECT = False
 
 # ---------------------------------------------------------------------------

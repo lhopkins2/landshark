@@ -10,6 +10,7 @@ import ChainOfTitlePage from "./pages/ChainOfTitlePage";
 import DocumentsPage from "./pages/DocumentsPage";
 import SettingsPage from "./pages/SettingsPage";
 import ReviewPage from "./pages/ReviewPage";
+import DocumentAnalysesPage from "./pages/DocumentAnalysesPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import TroubleshootingPage from "./pages/TroubleshootingPage";
 import AuditLogPage from "./pages/AuditLogPage";
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="documents" element={<DocumentsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="review/:analysisId" element={<ReviewPage />} />
+        <Route path="documents/:documentId/analyses" element={<DocumentAnalysesPage />} />
         <Route path="users" element={<AdminRoute><UserManagementPage /></AdminRoute>} />
         <Route path="audit-log" element={<AdminRoute><AuditLogPage /></AdminRoute>} />
         <Route path="troubleshooting" element={<DeveloperRoute><TroubleshootingPage /></DeveloperRoute>} />

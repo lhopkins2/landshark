@@ -36,5 +36,5 @@ class AuditLog(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.action} by {self.user} on {self.document_name}"

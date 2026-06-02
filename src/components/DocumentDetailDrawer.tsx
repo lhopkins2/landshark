@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { X, Eye, Download, Clock } from "lucide-react";
+import { X, Eye, Download, Clock, FileSearch, Upload } from "lucide-react";
 import { analysesApi } from "../api/analysis";
 import { documentsApi } from "../api/documents";
 import DocumentViewer from "./DocumentViewer";
 import StatusBadge from "./StatusBadge";
+import ExportModal from "./ExportModal";
 import { formatFileSize } from "../utils/format";
 import type { Document, COTAnalysis } from "../types/models";
 
@@ -17,7 +18,16 @@ interface DocumentDetailDrawerProps {
 export default function DocumentDetailDrawer({ document: doc, onClose }: DocumentDetailDrawerProps) {
   const navigate = useNavigate();
   const [showPreview, setShowPreview] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const previewMode = "document" as const;
+
+  const isPdf =
+    doc.mime_type?.toLowerCase() === "application/pdf" ||
+    doc.original_filename.toLowerCase().endsWith(".pdf");
+  // Eligibility for Export: must be a generated analysis output.
+  const exportableAnalysisId = doc.analysis_id;
+  const exportBaseName = doc.original_filename.replace(/\.(pdf|docx)$/i, "");
+  const docSourceFormat: "pdf" | "docx" = isPdf ? "pdf" : "docx";
 
   const { data: analyses, isLoading: analysesLoading } = useQuery({
     queryKey: ["analyses", { document: doc.id }],
@@ -68,21 +78,54 @@ export default function DocumentDetailDrawer({ document: doc, onClose }: Documen
               </button>
             </div>
           </div>
-          <button
-            onClick={() => setShowPreview(!showPreview)}
-            title={showPreview ? "Hide preview" : "Preview document"}
-            style={{
-              display: "flex", alignItems: "center", gap: 4,
-              padding: "6px 12px", borderRadius: "var(--ls-radius-md)",
-              border: "1px solid var(--ls-accent)",
-              backgroundColor: showPreview ? "var(--ls-accent)" : "rgba(212,160,23,0.1)",
-              color: showPreview ? "var(--ls-text-on-accent)" : "var(--ls-accent)",
-              fontSize: "var(--ls-text-xs)", fontWeight: 600, cursor: "pointer",
-              alignSelf: "flex-start",
-            }}
-          >
-            <Eye size={14} /> {showPreview ? "Hide Preview" : "Preview"}
-          </button>
+          <div style={{ display: "flex", gap: "var(--ls-space-xs)", alignSelf: "flex-start" }}>
+            <button
+              onClick={() => setShowPreview(!showPreview)}
+              title={showPreview ? "Hide preview" : "Preview document"}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "6px 12px", borderRadius: "var(--ls-radius-md)",
+                border: "1px solid var(--ls-accent)",
+                backgroundColor: showPreview ? "var(--ls-accent)" : "rgba(212,160,23,0.1)",
+                color: showPreview ? "var(--ls-text-on-accent)" : "var(--ls-accent)",
+                fontSize: "var(--ls-text-xs)", fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              <Eye size={14} /> {showPreview ? "Hide Preview" : "Preview"}
+            </button>
+            <button
+              onClick={() => navigate(`/documents/${doc.id}/analyses`)}
+              title="Compare and open analyses for this document"
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "6px 12px", borderRadius: "var(--ls-radius-md)",
+                border: "none",
+                backgroundColor: "var(--ls-primary)",
+                color: "var(--ls-text-on-primary)",
+                fontSize: "var(--ls-text-xs)", fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              <FileSearch size={14} /> Review
+            </button>
+            {exportableAnalysisId && (
+              <button
+                onClick={() => setShowExport(true)}
+                title="Export this analyzed COT — rename, swap PDF/DOCX, optionally drop Doc Pg column"
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "6px 12px", borderRadius: "var(--ls-radius-md)",
+                  border: "1px solid var(--ls-border)",
+                  backgroundColor: "var(--ls-bg)",
+                  color: "var(--ls-text-secondary)",
+                  fontSize: "var(--ls-text-xs)", fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                <Upload size={14} /> Export
+              </button>
+            )}
+          </div>
         </div>
 
         {showPreview ? (
@@ -113,6 +156,14 @@ export default function DocumentDetailDrawer({ document: doc, onClose }: Documen
           </div>
         )}
       </div>
+      {showExport && exportableAnalysisId && (
+        <ExportModal
+          analysisId={exportableAnalysisId}
+          defaultBaseName={exportBaseName}
+          sourceFormat={docSourceFormat}
+          onClose={() => setShowExport(false)}
+        />
+      )}
     </>
   );
 }

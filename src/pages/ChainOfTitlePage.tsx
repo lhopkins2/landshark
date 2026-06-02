@@ -12,7 +12,7 @@ import { analysesApi, analysisSettingsApi } from "../api/analysis";
 import { ANALYSIS_ORDERS, PROGRESS_STEPS } from "../utils/constants";
 import { formatFileSize } from "../utils/format";
 import StatusBadge from "../components/StatusBadge";
-import type { Document, DocumentFolder, COTAnalysis, AnalysisOrder, OutputFormat } from "../types/models";
+import type { Document, DocumentFolder, COTAnalysis, AnalysisOrder } from "../types/models";
 
 export default function ChainOfTitlePage() {
   const queryClient = useQueryClient();
@@ -26,8 +26,6 @@ export default function ChainOfTitlePage() {
   const [legalDescription, setLegalDescription] = useState("");
 
   const [analysisOrder, setAnalysisOrder] = useState<AnalysisOrder>("chronological");
-  const [outputFormat, setOutputFormat] = useState<OutputFormat>("pdf");
-  const [customRequest, setCustomRequest] = useState("");
 
   const [currentResult, setCurrentResult] = useState<COTAnalysis | null>(null);
 
@@ -110,12 +108,13 @@ export default function ChainOfTitlePage() {
   const analyzeMutation = useMutation({
     mutationFn: () => {
       if (!selectedDocId) throw new Error("Select a document");
+      // Output format is no longer chosen up-front — analyses always render as PDF.
+      // The Export modal on the analyzed COT lets the user re-render as PDF or DOCX
+      // (with optional Doc Pg stripping) without re-running the AI.
       return analysesApi.run({
         document_id: selectedDocId,
         analysis_order: analysisOrder,
-        output_format: outputFormat,
         legal_description: legalDescription || undefined,
-        custom_request: customRequest || undefined,
       });
     },
     onSuccess: (res) => {
@@ -431,26 +430,6 @@ export default function ChainOfTitlePage() {
           </div>
         </div>
 
-        <div style={{ marginTop: "var(--ls-space-md)" }}>
-          <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
-            Custom Request <span style={{ fontWeight: 400, color: "var(--ls-text-muted)" }}>(optional)</span>
-          </label>
-          <textarea
-            value={customRequest}
-            onChange={(e) => setCustomRequest(e.target.value)}
-            placeholder="Add specific instructions for this analysis (e.g., &quot;Only extract warranty deeds&quot;, &quot;Include mortgage assignments&quot;, &quot;Flag any gaps in the chain&quot;)..."
-            rows={3}
-            style={{
-              width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
-              border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
-              fontSize: "var(--ls-text-sm)", color: "var(--ls-text)",
-              resize: "vertical", fontFamily: "inherit",
-            }}
-          />
-          <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 4 }}>
-            These instructions will be prioritized by the AI during analysis.
-          </p>
-        </div>
       </SectionCard>
 
       <div style={{ marginBottom: "var(--ls-space-lg)" }}>
@@ -475,24 +454,6 @@ export default function ChainOfTitlePage() {
               <><Play size={18} /> Analyze</>
             )}
           </button>
-          <div style={{ display: "flex", borderRadius: "var(--ls-radius-md)", overflow: "hidden", border: "1px solid var(--ls-border)" }}>
-            {(["pdf", "docx"] as const).map((fmt) => (
-              <button
-                key={fmt}
-                onClick={() => setOutputFormat(fmt)}
-                style={{
-                  padding: "10px 16px", border: "none",
-                  backgroundColor: outputFormat === fmt ? "var(--ls-primary)" : "var(--ls-bg)",
-                  color: outputFormat === fmt ? "var(--ls-text-on-primary)" : "var(--ls-text-secondary)",
-                  fontWeight: outputFormat === fmt ? 700 : 400,
-                  fontSize: "var(--ls-text-sm)", cursor: "pointer",
-                  borderRight: fmt === "pdf" ? "1px solid var(--ls-border)" : "none",
-                }}
-              >
-                {fmt === "pdf" ? "PDF" : "DOCX"}
-              </button>
-            ))}
-          </div>
         </div>
         {isAnalyzing && (
           <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)", marginTop: "var(--ls-space-xs)" }}>
@@ -794,8 +755,27 @@ function PastAnalysisItem({ analysis, onView, onReview }: { analysis: COTAnalysi
     >
       <Clock size={14} style={{ color: "var(--ls-text-muted)", flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {analysis.document_name ?? "Unknown document"}
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-xs)", minWidth: 0 }}>
+          <div style={{
+            fontSize: "var(--ls-text-sm)", fontWeight: 500,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            textDecoration: analysis.document_deleted ? "line-through" : "none",
+            color: analysis.document_deleted ? "var(--ls-text-muted)" : undefined,
+          }}>
+            {analysis.document_name ?? "Unknown document"}
+          </div>
+          {analysis.document_deleted && (
+            <span style={{
+              flexShrink: 0,
+              fontSize: "var(--ls-text-xs)", padding: "1px 6px",
+              borderRadius: "var(--ls-radius-sm)", textTransform: "uppercase",
+              letterSpacing: "0.05em", fontWeight: 600,
+              background: "rgba(239,68,68,0.1)", color: "#ef4444",
+              border: "1px solid rgba(239,68,68,0.3)",
+            }}>
+              Source Deleted
+            </span>
+          )}
         </div>
         <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
           {new Date(analysis.created_at).toLocaleString()}

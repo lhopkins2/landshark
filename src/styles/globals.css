@@ -319,6 +319,622 @@ input, textarea, select {
   overflow: hidden;
 }
 
+/* Uncertainty summary banner shown above review panels when the new pipeline
+   produces structured output. Reuses existing design tokens. */
+.ls-analysis-uncertainty {
+  border-top: 1px solid var(--ls-border);
+  background: var(--ls-surface);
+  color: var(--ls-text);
+  font-size: var(--ls-text-sm);
+}
+.ls-analysis-uncertainty-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ls-space-sm);
+  width: 100%;
+  padding: var(--ls-space-sm) var(--ls-space-lg);
+  background: transparent;
+  border: none;
+  color: var(--ls-text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.ls-analysis-uncertainty-header:hover {
+  background: var(--ls-bg);
+}
+.ls-analysis-uncertainty-header > span {
+  flex: 1;
+  color: var(--ls-text-secondary);
+}
+.ls-analysis-uncertainty-body {
+  padding: 0 var(--ls-space-lg) var(--ls-space-md);
+  border-top: 1px solid var(--ls-border);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ls-analysis-uncertainty-section {
+  padding-top: var(--ls-space-md);
+}
+.ls-analysis-uncertainty-section h4 {
+  margin: 0 0 var(--ls-space-xs);
+  font-size: var(--ls-text-sm);
+  font-weight: 600;
+  color: var(--ls-text);
+}
+.ls-analysis-uncertainty-section ul {
+  margin: 0;
+  padding-left: var(--ls-space-lg);
+  color: var(--ls-text-secondary);
+}
+.ls-analysis-uncertainty-section li {
+  margin: 2px 0;
+  line-height: 1.45;
+}
+.ls-analysis-uncertainty-failed {
+  margin-bottom: var(--ls-space-xs);
+  color: var(--ls-text-secondary);
+}
+.ls-analysis-uncertainty-pageref {
+  color: var(--ls-text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Document Analyses page (per-document review listing). Reached from the
+   "Review" button in the Documents tab; lets the user pick which analysis
+   to open or compare.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.ls-doc-review-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: var(--ls-space-xl) var(--ls-space-lg);
+  color: var(--ls-text);
+}
+.ls-doc-review-loading {
+  display: flex;
+  gap: var(--ls-space-sm);
+  align-items: center;
+  justify-content: center;
+  padding: var(--ls-space-xl);
+  color: var(--ls-text-muted);
+}
+.ls-doc-review-header {
+  margin-bottom: var(--ls-space-lg);
+}
+.ls-doc-review-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: var(--ls-text-muted);
+  cursor: pointer;
+  padding: 4px 0;
+  font: inherit;
+  font-size: var(--ls-text-sm);
+  margin-bottom: var(--ls-space-sm);
+}
+.ls-doc-review-back:hover {
+  color: var(--ls-text);
+}
+.ls-doc-review-title {
+  margin: 0;
+  font-size: var(--ls-text-xl);
+  font-weight: 700;
+}
+.ls-doc-review-subtitle {
+  margin: 4px 0 0;
+  color: var(--ls-text-muted);
+  font-size: var(--ls-text-sm);
+}
+.ls-doc-review-empty {
+  text-align: center;
+  padding: var(--ls-space-3xl) var(--ls-space-lg);
+  background: var(--ls-surface);
+  border: 1px dashed var(--ls-border);
+  border-radius: var(--ls-radius-lg);
+  color: var(--ls-text-secondary);
+}
+.ls-doc-review-empty h2 {
+  margin: var(--ls-space-sm) 0 var(--ls-space-xs);
+  font-size: var(--ls-text-lg);
+  color: var(--ls-text);
+}
+.ls-doc-review-empty p {
+  margin: 0 auto;
+  max-width: 460px;
+  font-size: var(--ls-text-sm);
+  line-height: 1.5;
+}
+.ls-doc-review-empty-cta {
+  margin-top: var(--ls-space-md);
+  background: var(--ls-primary);
+  color: var(--ls-text-on-primary);
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--ls-radius-md);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+.ls-doc-review-empty-cta:hover {
+  background: var(--ls-primary-hover);
+}
+.ls-doc-review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--ls-space-sm);
+}
+.ls-doc-review-card {
+  display: flex;
+  gap: var(--ls-space-md);
+  align-items: center;
+  padding: var(--ls-space-md);
+  background: var(--ls-surface);
+  border: 1px solid var(--ls-border);
+  border-radius: var(--ls-radius-lg);
+  transition: border-color var(--ls-transition-base), box-shadow var(--ls-transition-base);
+}
+.ls-doc-review-card[onclick],
+.ls-doc-review-card:has(.ls-doc-review-open-btn) {
+  cursor: pointer;
+}
+.ls-doc-review-card:hover {
+  border-color: var(--ls-accent);
+  box-shadow: var(--ls-shadow-sm);
+}
+.ls-doc-review-card-left {
+  color: var(--ls-text-muted);
+  flex-shrink: 0;
+}
+.ls-doc-review-card-body {
+  flex: 1;
+  min-width: 0;
+}
+.ls-doc-review-card-row1 {
+  display: flex;
+  align-items: center;
+  gap: var(--ls-space-xs);
+  font-size: var(--ls-text-sm);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.ls-doc-review-card-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ls-doc-review-card-row2 {
+  font-size: var(--ls-text-xs);
+  color: var(--ls-text-muted);
+}
+.ls-doc-review-card-row3 {
+  font-size: var(--ls-text-xs);
+  color: var(--ls-text-secondary);
+  margin-top: 4px;
+  font-style: italic;
+}
+.ls-doc-review-card-error {
+  font-size: var(--ls-text-xs);
+  color: var(--ls-error);
+  margin-top: 4px;
+}
+.ls-doc-review-badge {
+  font-size: var(--ls-text-xs);
+  padding: 1px 6px;
+  border-radius: var(--ls-radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.ls-doc-review-badge.latest {
+  background: var(--ls-accent);
+  color: var(--ls-text-on-primary);
+}
+.ls-doc-review-badge.revision {
+  background: var(--ls-bg);
+  color: var(--ls-text-secondary);
+  border: 1px solid var(--ls-border);
+}
+.ls-doc-review-badge.deleted {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.ls-doc-review-card-right {
+  display: flex;
+  gap: var(--ls-space-xs);
+  flex-shrink: 0;
+}
+.ls-doc-review-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--ls-radius-md);
+  border: 1px solid var(--ls-border);
+  background: transparent;
+  color: var(--ls-text-secondary);
+  cursor: pointer;
+}
+.ls-doc-review-icon-btn:hover {
+  background: var(--ls-bg);
+}
+.ls-doc-review-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--ls-primary);
+  color: var(--ls-text-on-primary);
+  border: none;
+  border-radius: var(--ls-radius-md);
+  font: inherit;
+  font-size: var(--ls-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.ls-doc-review-open-btn:hover {
+  background: var(--ls-primary-hover);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Re-analyze with changes — modal + ReviewPage chips.
+   Reuses --ls-* tokens; no new color values.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.ls-review-revision-row {
+  display: flex;
+  gap: var(--ls-space-xs);
+  align-items: center;
+  margin-top: var(--ls-space-xs);
+}
+.ls-review-revision-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: var(--ls-text-xs);
+  background: var(--ls-bg);
+  border: 1px solid var(--ls-border);
+  border-radius: var(--ls-radius-sm);
+  color: var(--ls-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--ls-text-xs);
+}
+.ls-review-revision-chip:hover {
+  background: var(--ls-surface);
+  color: var(--ls-text);
+}
+.ls-review-revision-badge {
+  display: inline-block;
+  margin-left: var(--ls-space-xs);
+  padding: 1px 6px;
+  font-size: var(--ls-text-xs);
+  background: var(--ls-accent);
+  color: var(--ls-text-on-primary);
+  border-radius: var(--ls-radius-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ls-review-revisions-dropdown {
+  position: relative;
+}
+.ls-review-revisions-dropdown summary {
+  list-style: none;
+  cursor: pointer;
+}
+.ls-review-revisions-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+.ls-review-revisions-dropdown ul {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin: 4px 0 0;
+  padding: 4px;
+  min-width: 280px;
+  max-width: 420px;
+  background: var(--ls-surface);
+  border: 1px solid var(--ls-border);
+  border-radius: var(--ls-radius-md);
+  box-shadow: var(--ls-shadow-md);
+  list-style: none;
+  z-index: 10;
+}
+.ls-review-revisions-dropdown li button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--ls-radius-sm);
+  font: inherit;
+}
+.ls-review-revisions-dropdown li button:hover {
+  background: var(--ls-bg);
+}
+.ls-review-revision-date {
+  font-size: var(--ls-text-xs);
+  color: var(--ls-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ls-review-revision-instr {
+  font-size: var(--ls-text-sm);
+  color: var(--ls-text);
+}
+
+.ls-review-header-actions {
+  display: flex;
+  gap: var(--ls-space-xs);
+  margin-left: auto;
+  align-items: center;
+}
+.ls-review-reanalyze-btn,
+.ls-review-strip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--ls-radius-md);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--ls-text-sm);
+  font-weight: 500;
+}
+.ls-review-reanalyze-btn {
+  background: var(--ls-primary);
+  color: var(--ls-text-on-primary);
+}
+.ls-review-reanalyze-btn:hover {
+  background: var(--ls-primary-hover);
+}
+.ls-review-strip-btn {
+  background: transparent;
+  color: var(--ls-text-secondary);
+  border: 1px solid var(--ls-border);
+}
+.ls-review-strip-btn:hover {
+  background: var(--ls-bg);
+  color: var(--ls-text);
+  border-color: var(--ls-accent);
+}
+
+/* Modal */
+.ls-reanalyze-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: var(--ls-space-lg);
+}
+.ls-reanalyze-modal {
+  background: var(--ls-surface);
+  color: var(--ls-text);
+  width: min(1100px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--ls-radius-lg);
+  box-shadow: var(--ls-shadow-md);
+  overflow: hidden;
+}
+.ls-reanalyze-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--ls-space-lg);
+  border-bottom: 1px solid var(--ls-border);
+}
+.ls-reanalyze-title {
+  margin: 0;
+  font-size: var(--ls-text-lg);
+  font-weight: 600;
+}
+.ls-reanalyze-subtitle {
+  margin: 2px 0 0;
+  font-size: var(--ls-text-sm);
+  color: var(--ls-text-secondary);
+}
+.ls-reanalyze-close {
+  background: transparent;
+  border: none;
+  color: var(--ls-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--ls-radius-sm);
+}
+.ls-reanalyze-close:hover {
+  background: var(--ls-bg);
+  color: var(--ls-text);
+}
+.ls-reanalyze-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--ls-space-lg);
+}
+.ls-reanalyze-section {
+  margin-bottom: var(--ls-space-xl);
+}
+.ls-reanalyze-section h3 {
+  margin: 0 0 4px;
+  font-size: var(--ls-text-md);
+  font-weight: 600;
+}
+.ls-reanalyze-hint {
+  margin: 0 0 var(--ls-space-sm);
+  font-size: var(--ls-text-xs);
+  color: var(--ls-text-muted);
+  line-height: 1.5;
+}
+.ls-reanalyze-hint code {
+  background: var(--ls-bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.ls-reanalyze-table-wrap {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--ls-border);
+  border-radius: var(--ls-radius-md);
+}
+.ls-reanalyze-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ls-text-xs);
+}
+.ls-reanalyze-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--ls-bg);
+  color: var(--ls-text-secondary);
+  padding: 6px 8px;
+  text-align: left;
+  font-weight: 600;
+  border-bottom: 1px solid var(--ls-border);
+  z-index: 1;
+}
+.ls-reanalyze-table tbody td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--ls-border);
+  vertical-align: top;
+}
+.ls-reanalyze-table tr.edited {
+  background: rgba(212, 160, 23, 0.07);   /* tinted gold */
+}
+.ls-reanalyze-cell-idx {
+  color: var(--ls-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.ls-reanalyze-cell-pg {
+  color: var(--ls-text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.ls-reanalyze-cell-input {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: var(--ls-text-xs);
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+.ls-reanalyze-cell-input:hover {
+  border-color: var(--ls-border);
+}
+.ls-reanalyze-cell-input:focus {
+  outline: none;
+  border-color: var(--ls-accent);
+  background: var(--ls-bg);
+}
+.ls-reanalyze-cell-textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+.ls-reanalyze-revert {
+  background: transparent;
+  border: none;
+  color: var(--ls-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  text-decoration: underline;
+  padding: 0;
+}
+.ls-reanalyze-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--ls-border);
+  border-radius: var(--ls-radius-md);
+  background: var(--ls-bg);
+  color: var(--ls-text);
+  font: inherit;
+  font-size: var(--ls-text-sm);
+  box-sizing: border-box;
+}
+.ls-reanalyze-input:focus {
+  outline: none;
+  border-color: var(--ls-accent);
+}
+.ls-reanalyze-textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: inherit;
+}
+.ls-reanalyze-error {
+  margin: 6px 0 0;
+  color: var(--ls-error);
+  font-size: var(--ls-text-xs);
+}
+.ls-reanalyze-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ls-space-md) var(--ls-space-lg);
+  border-top: 1px solid var(--ls-border);
+  background: var(--ls-bg);
+}
+.ls-reanalyze-summary {
+  font-size: var(--ls-text-xs);
+  color: var(--ls-text-secondary);
+}
+.ls-reanalyze-actions {
+  display: flex;
+  gap: var(--ls-space-sm);
+}
+.ls-reanalyze-cancel,
+.ls-reanalyze-submit {
+  padding: 6px 14px;
+  border-radius: var(--ls-radius-md);
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--ls-text-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ls-reanalyze-cancel {
+  background: transparent;
+  color: var(--ls-text-secondary);
+  border: 1px solid var(--ls-border);
+}
+.ls-reanalyze-cancel:hover:not(:disabled) {
+  background: var(--ls-surface);
+}
+.ls-reanalyze-submit {
+  background: var(--ls-primary);
+  color: var(--ls-text-on-primary);
+}
+.ls-reanalyze-submit:hover:not(:disabled) {
+  background: var(--ls-primary-hover);
+}
+.ls-reanalyze-submit:disabled,
+.ls-reanalyze-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .review-panel {
   flex: 1;
   display: flex;

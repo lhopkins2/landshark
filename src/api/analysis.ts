@@ -1,40 +1,34 @@
 import apiClient from "./client";
 import type {
-  FormTemplate,
   UserAnalysisSettings,
   COTAnalysis,
   COTAnalysisDebug,
   PaginatedResponse,
+  ReanalyzePayload,
 } from "../types/models";
 
-export const formTemplatesApi = {
-  list: (params?: Record<string, string>) =>
-    apiClient.get<PaginatedResponse<FormTemplate>>("/form-templates/", { params }),
-  get: (id: string) =>
-    apiClient.get<FormTemplate>(`/form-templates/${id}/`),
-  upload: (data: FormData) =>
-    apiClient.post<FormTemplate>("/form-templates/", data, {
-      headers: { "Content-Type": "multipart/form-data" },
-    }),
-  update: (id: string, data: Partial<Pick<FormTemplate, "name" | "description" | "custom_prompt">>) =>
-    apiClient.patch<FormTemplate>(`/form-templates/${id}/`, data),
-  delete: (id: string) =>
-    apiClient.delete(`/form-templates/${id}/`),
-};
+/** Payload accepted by `PUT /api/analysis/settings/` (user or org). */
+export interface AnalysisSettingsUpdate {
+  default_provider?: string;
+  default_model?: string;
+  anthropic_api_key?: string;
+  openai_api_key?: string;
+  gemini_api_key?: string;
+}
+
+/** Single entry in the model list returned by `GET /api/analysis/models/`. */
+export interface ProviderModelOption {
+  id: string;
+  name: string;
+}
 
 export const analysisSettingsApi = {
   get: () =>
     apiClient.get<UserAnalysisSettings>("/analysis/settings/"),
-  update: (data: {
-    default_provider?: string;
-    default_model?: string;
-    anthropic_api_key?: string;
-    openai_api_key?: string;
-    gemini_api_key?: string;
-  }) =>
+  update: (data: AnalysisSettingsUpdate) =>
     apiClient.put<UserAnalysisSettings>("/analysis/settings/", data),
   listModels: (provider: string) =>
-    apiClient.get<{ models: { id: string; name: string }[] }>(
+    apiClient.get<{ models: ProviderModelOption[] }>(
       "/analysis/models/",
       { params: { provider } },
     ),
@@ -50,17 +44,41 @@ export const analysesApi = {
     analysis_order: string;
     output_format?: string;
     legal_description?: string;
-    custom_request?: string;
     provider?: string;
     model?: string;
   }) =>
     apiClient.post<COTAnalysis>("/analysis/run/", data),
   cancel: (id: string) =>
     apiClient.post<COTAnalysis>(`/analysis/cancel/${id}/`),
+  reanalyze: (id: string, payload: ReanalyzePayload) =>
+    apiClient.post<COTAnalysis>(`/analysis/${id}/reanalyze/`, payload),
+  /** Render the analysis output to PDF/DOCX (with optional Doc Pg strip) and trigger a browser download. */
+  export: async (
+    id: string,
+    opts: { format: "pdf" | "docx"; strip_doc_pg?: boolean; filename?: string },
+  ) => {
+    const response = await apiClient.post(`/analysis/${id}/export/`, opts, {
+      responseType: "blob",
+    });
+    const cd = (response.headers["content-disposition"] || "") as string;
+    const match = cd.match(/filename="([^"]+)"/);
+    const fallback = `analysis.${opts.format}`;
+    const filename = opts.filename
+      ? (opts.filename.toLowerCase().endsWith(`.${opts.format}`)
+          ? opts.filename
+          : `${opts.filename}.${opts.format}`)
+      : (match ? match[1] : fallback);
+    const url = window.URL.createObjectURL(response.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
   debug: (id: string) =>
     apiClient.get<COTAnalysisDebug>(`/analysis/debug/${id}/`),
-  workerHealth: () =>
-    apiClient.get<{ worker_running: boolean; stale_count: number }>("/analysis/worker-health/"),
 };
 
 interface DashboardStats {

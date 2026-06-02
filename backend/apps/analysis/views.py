@@ -1,5 +1,7 @@
 import datetime
 import logging
+import os
+from typing import Any
 
 from django.core.files.base import ContentFile
 from django.utils import timezone
@@ -23,16 +25,18 @@ from .serializers import (
     FormTemplateSerializer,
     FormTemplateUploadSerializer,
     OrganizationSettingsSerializer,
+    ReanalyzeSerializer,
     RunAnalysisSerializer,
     UserSettingsSerializer,
 )
 from .services.ai_providers import list_models
+from .services.document_generator import generate_document, strip_page_column
 from .utils import STALE_ANALYSIS_TIMEOUT, is_qcluster_running, recover_stale_analyses
 
 logger = logging.getLogger(__name__)
 
 
-def _user_is_admin(user):
+def _user_is_admin(user: Any) -> bool:
     """Return True if the user is a developer or an org admin."""
     if getattr(user, "is_developer", False):
         return True
@@ -40,12 +44,11 @@ def _user_is_admin(user):
     return bool(membership and membership.role == "admin")
 
 
-def resolve_api_config(user):
-    """Resolve API keys and defaults for a user.
+def resolve_api_config(user: Any) -> tuple[str, str, dict[str, str]]:
+    """Resolve (provider, model, api_key_map) for a user.
 
-    Returns (provider, model, api_key_map) with fallback:
-    1. If user has API key access and personal keys configured, use those.
-    2. Otherwise, fall back to organization-level settings.
+    Prefers personal keys if the user has API key access and any are set;
+    otherwise falls back to the organization's settings, then to a final default.
     """
     from apps.accounts.models import Membership
 
@@ -97,7 +100,7 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
     search_fields = ["name", "description"]
     ordering_fields = ["name", "created_at"]
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         qs = super().get_queryset()
         user = self.request.user
         if getattr(user, "is_developer", False):
@@ -107,18 +110,17 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
             return qs.none()
         return qs.filter(uploaded_by__membership__organization=membership.organization)
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type:
         if self.action == "create":
             return FormTemplateUploadSerializer
         return FormTemplateSerializer
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Any, *args: Any, **kwargs: Any) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         template = serializer.save()
 
-        # Mirror the template as a Document so it shows up in the Documents tab
-        # with its own file copy under the documents/ media path.
+        # Also mirror the template into Documents so it shows up under the documents/ media path.
         doc = Document(
             original_filename=template.original_filename,
             file_size=template.file_size,
@@ -138,11 +140,11 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
 class UserSettingsView(APIView):
     """GET/PUT endpoint for the current user's analysis settings."""
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
         return Response(UserSettingsSerializer(settings_obj).data)
 
-    def put(self, request):
+    def put(self, request: Any) -> Response:
         self.check_permissions(request)
         settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
         serializer = UserSettingsSerializer(settings_obj, data=request.data, partial=True)
@@ -150,7 +152,7 @@ class UserSettingsView(APIView):
         serializer.save()
         return Response(UserSettingsSerializer(settings_obj).data)
 
-    def get_permissions(self):
+    def get_permissions(self) -> list:
         if self.request.method == "PUT":
             return [IsAuthenticated(), HasApiKeyAccess()]
         return [IsAuthenticated()]
@@ -161,14 +163,14 @@ class OrgSettingsView(APIView):
 
     permission_classes = [IsAuthenticated, IsOrgAdmin]
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         org = get_user_organization(request.user)
         if not org:
             return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
         settings_obj, _ = OrganizationSettings.objects.get_or_create(organization=org)
         return Response(OrganizationSettingsSerializer(settings_obj).data)
 
-    def put(self, request):
+    def put(self, request: Any) -> Response:
         org = get_user_organization(request.user)
         if not org:
             return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
@@ -186,12 +188,12 @@ class COTAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ["status", "document"]
     ordering_fields = ["created_at"]
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         return COTAnalysis.objects.filter(created_by=self.request.user).select_related(
             "document", "generated_document"
         )
 
-    def retrieve(self, request, *args, **kwargs):
+    def retrieve(self, request: Any, *args: Any, **kwargs: Any) -> Response:
         recover_stale_analyses()
         return super().retrieve(request, *args, **kwargs)
 
@@ -199,7 +201,7 @@ class COTAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
 class ListModelsView(APIView):
     """GET endpoint to list available models for a provider."""
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         provider = request.query_params.get("provider")
         if not provider:
             return Response({"detail": "provider query param required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -222,7 +224,7 @@ class ListModelsView(APIView):
 class RunAnalysisView(APIView):
     """POST endpoint to trigger a COT analysis. Returns immediately and processes in background."""
 
-    def post(self, request):
+    def post(self, request: Any) -> Response:
         serializer = RunAnalysisSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
@@ -255,11 +257,11 @@ class RunAnalysisView(APIView):
             )
 
         output_format = serializer.validated_data.get("output_format", "pdf")
-        custom_request = serializer.validated_data.get("custom_request", "")
         legal_description = serializer.validated_data.get("legal_description", "")
 
         analysis = COTAnalysis.objects.create(
             document=document,
+            document_name_snapshot=document.original_filename or "",
             analysis_order=serializer.validated_data["analysis_order"],
             output_format=output_format,
             status=COTAnalysis.Status.PROCESSING,
@@ -280,7 +282,6 @@ class RunAnalysisView(APIView):
                 "model": model,
                 "output_format": output_format,
                 "legal_description": legal_description,
-                "custom_request": custom_request,
             },
         )
 
@@ -294,7 +295,6 @@ class RunAnalysisView(APIView):
             api_key,
             model,
             str(request.user.id),
-            custom_request,
             legal_description,
             task_name=f"analysis-{analysis.id}",
             timeout=480,
@@ -306,10 +306,206 @@ class RunAnalysisView(APIView):
         )
 
 
+class ReanalyzeView(APIView):
+    """POST a revision of an existing analysis.
+
+    Creates a child COTAnalysis (linked via `parent_analysis`) and dispatches the
+    background `reanalyze_task` with edits, pages-to-rescan, and free-form instructions.
+    """
+
+    def post(self, request: Any, pk: str) -> Response:
+        try:
+            parent = COTAnalysis.objects.get(id=pk, created_by=request.user)
+        except COTAnalysis.DoesNotExist:
+            return Response({"detail": "Analysis not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not parent.pipeline_version or not parent.parsed_documents:
+            return Response(
+                {"detail": "Re-analyze is only available for new-pipeline analyses with parsed_documents."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not parent.document:
+            return Response(
+                {"detail": "Parent analysis has no source document; cannot re-analyze."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not is_qcluster_running():
+            return Response(
+                {
+                    "detail": (
+                        "The background task worker is not running. "
+                        "Re-analysis cannot be processed. Please start the worker "
+                        "(python manage.py qcluster) and try again."
+                    )
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        serializer = ReanalyzeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        default_provider, default_model, api_key_map = resolve_api_config(request.user)
+        provider = serializer.validated_data.get("provider") or default_provider or parent.ai_provider
+        model = serializer.validated_data.get("model") or default_model or parent.ai_model
+        api_key = api_key_map.get(provider, "")
+        if not api_key:
+            return Response(
+                {"detail": f"No API key configured for {provider}. Please add one in Settings."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        pages_to_rescan = serializer.validated_data.get("pages_to_rescan") or []
+        parent_total_pages = 0
+        for pd in parent.parsed_documents or []:
+            parent_total_pages = max(parent_total_pages, int(pd.get("total_pages") or 0))
+        if parent_total_pages and any(p > parent_total_pages or p < 1 for p in pages_to_rescan):
+            return Response(
+                {"detail": f"pages_to_rescan must be within 1..{parent_total_pages}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        output_format = serializer.validated_data.get("output_format") or parent.output_format
+
+        snapshot_name = (
+            parent.document.original_filename if parent.document else parent.document_name_snapshot
+        ) or ""
+        analysis = COTAnalysis.objects.create(
+            document=parent.document,
+            document_name_snapshot=snapshot_name,
+            analysis_order=parent.analysis_order,
+            output_format=output_format,
+            status=COTAnalysis.Status.PROCESSING,
+            progress_step=COTAnalysis.ProgressStep.QUEUED,
+            ai_provider=provider,
+            ai_model=model,
+            created_by=request.user,
+            parent_analysis=parent,
+            revision_instructions=serializer.validated_data.get("user_instructions", "") or "",
+            revision_kind=COTAnalysis.RevisionKind.REVISION,
+        )
+
+        log_action(
+            action=AuditLog.Action.ANALYSIS_RUN,
+            user=request.user,
+            document_name=parent.document.original_filename,
+            document_id=parent.document.id,
+            details={
+                "analysis_id": str(analysis.id),
+                "parent_analysis_id": str(parent.id),
+                "provider": provider,
+                "model": model,
+                "output_format": output_format,
+                "revision": True,
+                "instrument_edits_count": len(serializer.validated_data.get("instrument_edits") or []),
+                "pages_rescanned": pages_to_rescan,
+                "has_instructions": bool(serializer.validated_data.get("user_instructions")),
+            },
+        )
+
+        async_task(
+            "apps.analysis.tasks.reanalyze_task",
+            str(analysis.id),
+            str(parent.id),
+            serializer.validated_data.get("instrument_edits") or [],
+            pages_to_rescan,
+            serializer.validated_data.get("user_instructions", "") or "",
+            provider,
+            api_key,
+            model,
+            str(request.user.id),
+            output_format,
+            parent.analysis_order,
+            task_name=f"reanalyze-{analysis.id}",
+            timeout=480,
+        )
+
+        return Response(
+            COTAnalysisSerializer(analysis, context={"request": request}).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class ExportAnalysisView(APIView):
+    """POST a render request for an analyzed-COT, returning the file as a blob.
+
+    Re-renders `analysis.result_text` to PDF or DOCX, optionally stripping the
+    Doc Pg column, and streams the result. Nothing is persisted to the DB —
+    this is a pure post-processing download. Subsumes the previous
+    convert-to-docx and strip-doc-pg endpoints.
+    """
+
+    _MIME = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+
+    def post(self, request: Any, pk: str) -> Response:
+        from django.http import HttpResponse
+
+        try:
+            analysis = COTAnalysis.objects.get(id=pk, created_by=request.user)
+        except COTAnalysis.DoesNotExist:
+            return Response({"detail": "Analysis not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not (analysis.result_text or "").strip():
+            return Response(
+                {"detail": "This analysis has no rendered output to export."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        target_format = (request.data.get("format") or analysis.output_format or "pdf").lower()
+        if target_format not in ("pdf", "docx"):
+            return Response(
+                {"detail": "format must be 'pdf' or 'docx'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        strip_doc_pg = bool(request.data.get("strip_doc_pg"))
+        markdown = strip_page_column(analysis.result_text) if strip_doc_pg else analysis.result_text
+
+        # Default filename derived from the generated document (or source); user-supplied wins.
+        if analysis.generated_document:
+            default_base = os.path.splitext(analysis.generated_document.original_filename)[0]
+        elif analysis.document:
+            default_base = os.path.splitext(analysis.document.original_filename)[0]
+        else:
+            default_base = "analysis"
+
+        raw_name = (request.data.get("filename") or "").strip()
+        base = os.path.splitext(raw_name)[0] if raw_name else default_base
+        # Sanitize: strip path separators and quotes (Content-Disposition injection guard).
+        base = base.replace("/", "_").replace("\\", "_").replace('"', "'").replace("\n", "").replace("\r", "")
+        if not base:
+            base = default_base
+        filename = f"{base}.{target_format}"
+
+        buf = generate_document(markdown, target_format, title=base)
+        data = buf.getvalue()
+
+        log_action(
+            action=AuditLog.Action.ANALYSIS_RUN,
+            user=request.user,
+            document_name=filename,
+            document_id=None,
+            details={
+                "action": "export_analysis",
+                "analysis_id": str(analysis.id),
+                "format": target_format,
+                "strip_doc_pg": strip_doc_pg,
+            },
+        )
+
+        response = HttpResponse(data, content_type=self._MIME[target_format])
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        response["Content-Length"] = len(data)
+        return response
+
+
 class CancelAnalysisView(APIView):
     """POST endpoint to cancel an in-progress analysis."""
 
-    def post(self, request, pk):
+    def post(self, request: Any, pk: str) -> Response:
         try:
             analysis = COTAnalysis.objects.get(id=pk, created_by=request.user)
         except COTAnalysis.DoesNotExist:
@@ -332,7 +528,7 @@ class CancelAnalysisView(APIView):
 class AnalysisDebugView(APIView):
     """GET endpoint for admin/developer debug info on an analysis."""
 
-    def get(self, request, pk):
+    def get(self, request: Any, pk: str) -> Response:
         if not _user_is_admin(request.user):
             return Response({"detail": "Admin access required."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -347,7 +543,7 @@ class AnalysisDebugView(APIView):
 class WorkerHealthView(APIView):
     """GET endpoint to check if the background worker is running."""
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         alive = is_qcluster_running()
         return Response({
             "worker_running": alive,
@@ -361,7 +557,7 @@ class WorkerHealthView(APIView):
 class DashboardStatsView(APIView):
     """GET endpoint returning dashboard statistics for the current user."""
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         user = request.user
         now = timezone.now()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -408,9 +604,9 @@ class BackupStatusView(APIView):
     """GET endpoint to check backup health. Admin/developer only."""
 
     BACKUP_STATUS_FILE = "/var/log/landshark/backup-status.json"
-    STALENESS_HOURS = 7  # slightly over the 6-hour interval
+    STALENESS_HOURS = 7  # one hour over the 6-hour backup interval
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         import json
         from pathlib import Path
 

@@ -1,3 +1,5 @@
+from typing import Any
+
 from rest_framework import serializers
 
 from .models import COTAnalysis, FormTemplate, OrganizationSettings, UserSettings
@@ -23,7 +25,7 @@ class FormTemplateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "uploaded_by", "file_size", "mime_type", "original_filename"]
 
-    def get_uploaded_by_name(self, obj):
+    def get_uploaded_by_name(self, obj: FormTemplate) -> str | None:
         if obj.uploaded_by:
             return f"{obj.uploaded_by.first_name} {obj.uploaded_by.last_name}".strip() or obj.uploaded_by.email
         return None
@@ -36,7 +38,7 @@ class FormTemplateUploadSerializer(serializers.ModelSerializer):
         model = FormTemplate
         fields = ["file", "name", "description", "custom_prompt"]
 
-    def validate_file(self, value):
+    def validate_file(self, value: Any) -> Any:
         allowed = [
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ]
@@ -44,7 +46,7 @@ class FormTemplateUploadSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Only DOCX files are allowed.")
         return value
 
-    def create(self, validated_data):
+    def create(self, validated_data: dict[str, Any]) -> FormTemplate:
         uploaded_file = validated_data["file"]
         validated_data["original_filename"] = uploaded_file.name
         validated_data["file_size"] = uploaded_file.size
@@ -62,29 +64,33 @@ class _APIKeySettingsSerializer(serializers.ModelSerializer):
 
     _KEY_FIELDS = ["anthropic_api_key", "openai_api_key", "gemini_api_key"]
 
-    def _mask_key(self, key):
+    def _mask_key(self, key: str) -> str:
         if not key:
             return ""
         return "\u2022" * 8 + key[-4:]
 
-    def get_anthropic_api_key_display(self, obj):
+    def get_anthropic_api_key_display(self, obj: UserSettings | OrganizationSettings) -> str:
         return self._mask_key(obj.anthropic_api_key)
 
-    def get_openai_api_key_display(self, obj):
+    def get_openai_api_key_display(self, obj: UserSettings | OrganizationSettings) -> str:
         return self._mask_key(obj.openai_api_key)
 
-    def get_gemini_api_key_display(self, obj):
+    def get_gemini_api_key_display(self, obj: UserSettings | OrganizationSettings) -> str:
         return self._mask_key(obj.gemini_api_key)
 
-    # Sentinel value to explicitly clear an API key (empty string is ignored
-    # to avoid accidental clears from form submissions that omit the field).
+    # Sentinel "CLEAR" explicitly wipes a stored key; blank/missing values are ignored
+    # so a partial form submission doesn't accidentally clear other keys.
     CLEAR_KEY = "CLEAR"
 
-    def update(self, instance, validated_data):
+    def update(
+        self,
+        instance: UserSettings | OrganizationSettings,
+        validated_data: dict[str, Any],
+    ) -> UserSettings | OrganizationSettings:
         for key_field in self._KEY_FIELDS:
             value = validated_data.get(key_field)
             if value is None or value == "":
-                continue  # field not submitted or blank — no change
+                continue
             if value == self.CLEAR_KEY:
                 setattr(instance, key_field, "")
             else:
@@ -143,9 +149,11 @@ class OrganizationSettingsSerializer(_APIKeySettingsSerializer):
 
 class COTAnalysisSerializer(serializers.ModelSerializer):
     document_name = serializers.SerializerMethodField()
+    document_deleted = serializers.SerializerMethodField()
     form_template_name = serializers.SerializerMethodField()
     generated_document_name = serializers.SerializerMethodField()
     generated_document_url = serializers.SerializerMethodField()
+    revisions = serializers.SerializerMethodField()
 
     class Meta:
         model = COTAnalysis
@@ -153,6 +161,7 @@ class COTAnalysisSerializer(serializers.ModelSerializer):
             "id",
             "document",
             "document_name",
+            "document_deleted",
             "form_template",
             "form_template_name",
             "analysis_order",
@@ -166,6 +175,16 @@ class COTAnalysisSerializer(serializers.ModelSerializer):
             "generated_document_name",
             "generated_document_url",
             "progress_step",
+            "pipeline_version",
+            "parsed_documents",
+            "chain_events",
+            "narrative",
+            "notes",
+            "failed_pages_count",
+            "parent_analysis",
+            "revision_instructions",
+            "revision_kind",
+            "revisions",
             "created_by",
             "created_at",
             "updated_at",
@@ -179,19 +198,49 @@ class COTAnalysisSerializer(serializers.ModelSerializer):
             "result_text",
             "error_message",
             "generated_document",
+            "pipeline_version",
+            "parsed_documents",
+            "chain_events",
+            "narrative",
+            "notes",
+            "failed_pages_count",
+            "parent_analysis",
+            "revision_instructions",
+            "revision_kind",
+            "revisions",
             "created_by",
         ]
 
-    def get_document_name(self, obj):
-        return obj.document.original_filename if obj.document else None
+    def get_revisions(self, obj: COTAnalysis) -> list[dict[str, str]]:
+        """Return child revisions of this analysis (newest first)."""
+        return [
+            {
+                "id": str(r.id),
+                "created_at": r.created_at.isoformat(),
+                "revision_instructions": r.revision_instructions or "",
+                "status": r.status,
+            }
+            for r in obj.revisions.order_by("-created_at")
+        ]
 
-    def get_form_template_name(self, obj):
+    def get_document_name(self, obj: COTAnalysis) -> str | None:
+        if obj.document:
+            return obj.document.original_filename
+        # Fall back to the snapshot so the review history can still label
+        # analyses whose source Document has been deleted.
+        return obj.document_name_snapshot or None
+
+    def get_document_deleted(self, obj: COTAnalysis) -> bool:
+        """True when the source Document was deleted after this analysis ran."""
+        return obj.document_id is None and bool(obj.document_name_snapshot)
+
+    def get_form_template_name(self, obj: COTAnalysis) -> str | None:
         return obj.form_template.name if obj.form_template else None
 
-    def get_generated_document_name(self, obj):
+    def get_generated_document_name(self, obj: COTAnalysis) -> str | None:
         return obj.generated_document.original_filename if obj.generated_document else None
 
-    def get_generated_document_url(self, obj):
+    def get_generated_document_url(self, obj: COTAnalysis) -> str | None:
         if obj.generated_document and obj.generated_document.file:
             request = self.context.get("request")
             if request:
@@ -213,7 +262,6 @@ class RunAnalysisSerializer(serializers.Serializer):
         default="pdf",
     )
     legal_description = serializers.CharField(required=False, allow_blank=True, default="")
-    custom_request = serializers.CharField(required=False, allow_blank=True, default="")
     provider = serializers.CharField(required=False, allow_blank=True, default="")
     model = serializers.CharField(required=False, allow_blank=True, default="")
 
@@ -223,3 +271,29 @@ class COTAnalysisDebugSerializer(COTAnalysisSerializer):
 
     class Meta(COTAnalysisSerializer.Meta):
         fields = COTAnalysisSerializer.Meta.fields + ["prompt_text"]
+
+
+class ReanalyzeInstrumentEditSerializer(serializers.Serializer):
+    """One entry in `instrument_edits`: replaces the instrument at `index` with the provided JSON."""
+
+    index = serializers.IntegerField(min_value=0)
+    instrument = serializers.JSONField()
+
+
+class ReanalyzeSerializer(serializers.Serializer):
+    """Input for POST /analysis/<id>/reanalyze/."""
+
+    instrument_edits = ReanalyzeInstrumentEditSerializer(many=True, required=False, default=list)
+    pages_to_rescan = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        required=False,
+        default=list,
+    )
+    user_instructions = serializers.CharField(required=False, allow_blank=True, default="")
+    provider = serializers.CharField(required=False, allow_blank=True, default="")
+    model = serializers.CharField(required=False, allow_blank=True, default="")
+    output_format = serializers.ChoiceField(
+        choices=COTAnalysis.OutputFormat.choices,
+        required=False,
+        default="pdf",
+    )

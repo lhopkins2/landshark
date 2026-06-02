@@ -218,7 +218,6 @@ function DetailsSummary({ details, action }: { details: Record<string, unknown>;
     if (details.provider) parts.push(`Provider: ${details.provider}`);
     if (details.model) parts.push(`Model: ${details.model}`);
     if (details.legal_description) parts.push(`Legal desc: ${String(details.legal_description).slice(0, 80)}${String(details.legal_description).length > 80 ? "..." : ""}`);
-    if (details.custom_request) parts.push(`Custom: ${String(details.custom_request).slice(0, 80)}${String(details.custom_request).length > 80 ? "..." : ""}`);
     if (details.output_format) parts.push(`Format: ${details.output_format}`);
     return <span style={{ lineHeight: 1.6 }}>{parts.map((p, i) => <span key={i}>{p}<br /></span>)}</span>;
   }

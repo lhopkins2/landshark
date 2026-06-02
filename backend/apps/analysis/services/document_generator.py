@@ -1,15 +1,11 @@
 import io
 import re
-from copy import deepcopy
 from pathlib import Path
 
 from docx import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 from fpdf import FPDF
-from fpdf.enums import TableBordersLayout
-from fpdf.fonts import FontFace
 
 _FONTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "fonts"
 _FONT_REGULAR = str(_FONTS_DIR / "DejaVuSans.ttf")
@@ -80,14 +76,10 @@ def generate_docx(text: str, title: str = "") -> io.BytesIO:
 
 
 def _clean_cell_text(text: str) -> str:
-    """Normalize whitespace in a table cell value.
-
-    Collapses tabs, multiple spaces, and embedded newlines so cell content
-    is always clean single-line text suitable for PDF/DOCX rendering.
-    """
-    text = re.sub(r"[\t\r\f\v]+", " ", text)   # tabs → space
-    text = re.sub(r"\n+", " ", text)             # newlines → space
-    text = re.sub(r" {2,}", " ", text)           # collapse runs of spaces
+    """Collapse tabs, newlines, and runs of spaces into a single-line cell value."""
+    text = re.sub(r"[\t\r\f\v]+", " ", text)
+    text = re.sub(r"\n+", " ", text)
+    text = re.sub(r" {2,}", " ", text)
     return text.strip()
 
 
@@ -105,9 +97,59 @@ def _is_table_separator(line: str) -> bool:
 
 
 def _is_page_col(header: str) -> bool:
-    """Return True if the header looks like a page-number column (Doc Pg, Page, Pg, etc.)."""
+    """True if the header looks like a page-number column (Doc Pg, Page, Pg, etc.)."""
     norm = re.sub(r"[^a-z]", "", header.lower())
     return norm in ("docpg", "page", "pages", "pg")
+
+
+def strip_page_column(markdown_text: str) -> str:
+    """Drop every "Doc Pg"-style column from any markdown table in the input.
+
+    Identifies contiguous table blocks, removes cells whose header matches
+    `_is_page_col`, and rebuilds the separator row to match the new column count.
+    """
+    out_lines: list[str] = []
+    lines = markdown_text.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if not _is_table_row(stripped):
+            out_lines.append(line)
+            i += 1
+            continue
+
+        block: list[list[str]] = []
+        had_separator = False
+        while i < len(lines):
+            s = lines[i].strip()
+            if _is_table_separator(s):
+                had_separator = True
+                i += 1
+                continue
+            if _is_table_row(s):
+                block.append(_parse_table_row(s))
+                i += 1
+                continue
+            break
+
+        if not block:
+            continue
+
+        headers = block[0]
+        drop_idx = {ci for ci, h in enumerate(headers) if _is_page_col(h)}
+        kept = [
+            [c for ci, c in enumerate(row) if ci not in drop_idx]
+            for row in block
+        ]
+
+        out_lines.append("| " + " | ".join(kept[0]) + " |")
+        if had_separator:
+            out_lines.append("|" + "|".join(["---"] * len(kept[0])) + "|")
+        for row in kept[1:]:
+            out_lines.append("| " + " | ".join(row) + " |")
+
+    return "\n".join(out_lines)
 
 
 def _compute_col_widths(headers: list[str], total_width: float) -> list[float]:
@@ -120,31 +162,176 @@ def _compute_col_widths(headers: list[str], total_width: float) -> list[float]:
     return [narrow if _is_page_col(h) else normal_width for h in headers]
 
 
+# Manual row layout. fpdf2's pdf.table() throws when a row's wrapped content can't
+# fit on the remaining page, which forced an all-or-nothing fallback. Driving layout
+# ourselves means we always know what fits and every row renders bordered correctly.
+_TABLE_FONT_SIZE = 8
+_LINE_HEIGHT_MM = 4.0
+_CELL_PAD_X = 1.0
+_CELL_PAD_Y = 1.0
+
+
+def _measure_cell_height(pdf: FPDF, text: str, inner_w: float) -> float:
+    """Wrapped height (mm) at the currently active font.
+
+    Caller MUST set the table font first — fpdf2's dry_run uses whatever font is set.
+    """
+    if not text:
+        return _LINE_HEIGHT_MM
+    return pdf.multi_cell(
+        w=inner_w,
+        h=_LINE_HEIGHT_MM,
+        text=text,
+        dry_run=True,
+        output="HEIGHT",
+    )
+
+
+def _measure_row_height(pdf: FPDF, row: list[str], col_widths: list[float]) -> float:
+    heights = [
+        _measure_cell_height(
+            pdf,
+            row[i] if i < len(row) else "",
+            col_widths[i] - 2 * _CELL_PAD_X,
+        )
+        for i in range(len(col_widths))
+    ]
+    return max(heights) + 2 * _CELL_PAD_Y
+
+
+def _draw_row(
+    pdf: FPDF,
+    row: list[str],
+    col_widths: list[float],
+    row_height: float,
+    is_header: bool,
+) -> None:
+    """Draw a single row at pdf.y with uniform borders.
+
+    Text goes through multi_cell (no border); a single rect() spanning row_height
+    is then drawn over it so cells line up regardless of individual wrapped heights.
+    """
+    x0, y0 = pdf.l_margin, pdf.y
+    pdf.set_font("DejaVu", "B" if is_header else "", _TABLE_FONT_SIZE)
+    x = x0
+    for i, w in enumerate(col_widths):
+        text = row[i] if i < len(row) else ""
+        pdf.set_xy(x + _CELL_PAD_X, y0 + _CELL_PAD_Y)
+        pdf.multi_cell(
+            w - 2 * _CELL_PAD_X,
+            _LINE_HEIGHT_MM,
+            text,
+            border=0,
+            align="L",
+            new_x="RIGHT",
+            new_y="TOP",
+            max_line_height=_LINE_HEIGHT_MM,
+        )
+        pdf.rect(x, y0, w, row_height)
+        x += w
+    pdf.set_xy(x0, y0 + row_height)
+
+
+def _wrap_text_to_height(pdf: FPDF, text: str, inner_w: float, budget_h: float) -> list[str]:
+    """Greedy split of `text` into chunks each measuring <= budget_h at inner_w.
+
+    Caller must have set the font used for measurement and drawing.
+    """
+    words = text.split()
+    if not words:
+        return [text]
+    chunks: list[str] = []
+    cur = ""
+    for word in words:
+        trial = (cur + " " + word).strip() if cur else word
+        h = _measure_cell_height(pdf, trial, inner_w)
+        if h > budget_h and cur:
+            chunks.append(cur)
+            cur = word
+        else:
+            cur = trial
+    if cur:
+        chunks.append(cur)
+    return chunks or [text]
+
+
+def _split_overflow_row(
+    pdf: FPDF,
+    row: list[str],
+    col_widths: list[float],
+    max_height: float,
+) -> list[list[str]]:
+    """Split the tallest cell across continuation rows so each fits in max_height.
+
+    Other cells appear once on the first row; later rows show '(cont'd)' in
+    column 0 and blanks elsewhere. Caller must have set the table font.
+    """
+    inner = [w - 2 * _CELL_PAD_X for w in col_widths]
+    heights = [_measure_cell_height(pdf, row[i], inner[i]) for i in range(len(row))]
+    worst = heights.index(max(heights))
+    # Headroom: vertical padding + a line for "(cont'd)" on continuation rows.
+    budget = max_height - 2 * _CELL_PAD_Y - _LINE_HEIGHT_MM
+    pieces = _wrap_text_to_height(pdf, row[worst], inner[worst], budget)
+    parts: list[list[str]] = []
+    for idx, piece in enumerate(pieces):
+        new_row = list(row)
+        new_row[worst] = piece
+        if idx > 0:
+            for j in range(len(new_row)):
+                new_row[j] = "(cont'd)" if j == 0 else ""
+            new_row[worst] = piece
+        parts.append(new_row)
+    return parts
+
+
 def _render_pdf_table(pdf: FPDF, rows: list[list[str]]) -> None:
-    if not rows:
+    """Render a markdown-style table by laying out rows manually.
+
+    Redraws the header at the top of each page. A row taller than an empty
+    page's usable area is split across continuation rows on the tallest cell.
+    """
+    if not rows or len(rows) < 2:
         return
 
-    num_cols = len(rows[0])
+    headers, *data_rows = rows
+    if not headers:
+        return
+    col_widths = _compute_col_widths(headers, pdf.epw)
 
-    heading_style = FontFace(emphasis="BOLD", size_pt=8)
-    pdf.set_font("DejaVu", "", 8)
+    pdf.set_font("DejaVu", "B", _TABLE_FONT_SIZE)
+    header_h = _measure_row_height(pdf, headers, col_widths)
 
-    table_width = pdf.epw  # effective page width (minus margins)
-    col_widths = _compute_col_widths(rows[0], table_width) if num_cols > 0 else None
+    def _ensure_space(row_h: float) -> None:
+        if pdf.y + row_h > pdf.h - pdf.b_margin:
+            pdf.add_page()
+            _draw_row(pdf, headers, col_widths, header_h, is_header=True)
 
-    with pdf.table(
-        borders_layout=TableBordersLayout.ALL,
-        first_row_as_headings=True,
-        headings_style=heading_style,
-        line_height=5,
-        align="LEFT",
-        col_widths=col_widths,
-    ) as table:
-        for row_data in rows:
-            row = table.row()
-            padded = row_data[:num_cols] + [""] * max(0, num_cols - len(row_data))
-            for cell_text in padded:
-                row.cell(cell_text, align="LEFT")
+    # Pagination is driven manually here; fpdf2's auto-break races with multi_cell mid-row.
+    prev_auto_break = pdf.auto_page_break
+    prev_b_margin = pdf.b_margin
+    pdf.set_auto_page_break(auto=False, margin=prev_b_margin)
+    try:
+        _draw_row(pdf, headers, col_widths, header_h, is_header=True)
+
+        usable_full_page = pdf.h - pdf.t_margin - prev_b_margin - header_h
+        num_cols = len(col_widths)
+
+        for raw in data_rows:
+            row = list(raw[:num_cols]) + [""] * max(0, num_cols - len(raw))
+            pdf.set_font("DejaVu", "", _TABLE_FONT_SIZE)
+            row_h = _measure_row_height(pdf, row, col_widths)
+
+            if row_h > usable_full_page:
+                for part in _split_overflow_row(pdf, row, col_widths, usable_full_page):
+                    pdf.set_font("DejaVu", "", _TABLE_FONT_SIZE)
+                    part_h = _measure_row_height(pdf, part, col_widths)
+                    _ensure_space(part_h)
+                    _draw_row(pdf, part, col_widths, part_h, is_header=False)
+            else:
+                _ensure_space(row_h)
+                _draw_row(pdf, row, col_widths, row_h, is_header=False)
+    finally:
+        pdf.set_auto_page_break(auto=prev_auto_break, margin=prev_b_margin)
 
     pdf.set_font("DejaVu", "", 10)
 
@@ -196,11 +383,7 @@ def generate_pdf(text: str, title: str = "") -> io.BytesIO:
                     i += 1
                     continue
                 break
-            try:
-                _render_pdf_table(pdf, table_rows)
-            except Exception:
-                for row_data in table_rows:
-                    pdf.multi_cell(0, 5, " | ".join(row_data), new_x="LMARGIN", new_y="NEXT")
+            _render_pdf_table(pdf, table_rows)
             continue
         else:
             pdf.multi_cell(0, 5, stripped, new_x="LMARGIN", new_y="NEXT")
@@ -219,234 +402,3 @@ def generate_document(text: str, output_format: str, title: str = "") -> io.Byte
     return generate_pdf(text, title)
 
 
-def _extract_data_rows_from_ai_text(text: str) -> list[list[str]]:
-    """Extract only data rows (not the header) from the AI's markdown table."""
-    rows: list[list[str]] = []
-    found_header = False
-    for line in text.split("\n"):
-        stripped = line.strip()
-        if not _is_table_row(stripped):
-            continue
-        if _is_table_separator(stripped):
-            continue
-        if not found_header:
-            found_header = True  # skip the AI's header row — template already has it
-            continue
-        rows.append(_parse_table_row(stripped))
-    return rows
-
-
-def _collect_all_tables(doc: DocxDocument):
-    """Recursively collect all tables in the document, including nested ones."""
-    tables = []
-
-    def _recurse(element):
-        for table in getattr(element, "tables", []):
-            tables.append(table)
-            for row in table.rows:
-                for cell in row.cells:
-                    _recurse(cell)
-
-    _recurse(doc)
-    return tables
-
-
-def _find_data_table(doc: DocxDocument):
-    """Find the main data table in the template.
-
-    Searches all tables (including nested ones inside cells) and returns the
-    one whose "column header row" has the most unique non-empty cells — that
-    is the actual data table, not a wrapper or header-fields table.
-    """
-    all_tables = _collect_all_tables(doc)
-    if not all_tables:
-        return None
-
-    best_table = None
-    best_score = 0
-    for table in all_tables:
-        for row in table.rows:
-            unique = {c.text.strip() for c in row.cells if c.text.strip()}
-            if len(unique) > best_score:
-                best_score = len(unique)
-                best_table = table
-
-    return best_table
-
-
-def _find_column_header_row(table) -> int:
-    """Find the row that serves as the column header for data rows.
-
-    This is the row with the most unique non-empty cell values — it contains
-    headings like 'Document Caption', 'Grantor', 'Grantee', etc.
-    Returns the row index (0-based).
-    """
-    best_idx = 0
-    best_count = 0
-    for i, row in enumerate(table.rows):
-        unique = {c.text.strip() for c in row.cells if c.text.strip()}
-        if len(unique) > best_count:
-            best_count = len(unique)
-            best_idx = i
-    return best_idx
-
-
-def _get_template_row(table, header_row_idx: int) -> int:
-    """Return the index of the row to use as a formatting template.
-
-    Prefers a data row after the column header. Falls back to the header row.
-    """
-    if len(table.rows) > header_row_idx + 1:
-        return len(table.rows) - 1  # last row — usually a blank data row
-    return header_row_idx
-
-
-def _set_cell_text_preserving_format(tc_elem, text: str):
-    """Replace all text in a <w:tc> element while keeping paragraph/run formatting."""
-    paragraphs = tc_elem.findall(qn("w:p"))
-    if not paragraphs:
-        return
-
-    p = paragraphs[0]
-
-    for extra_p in paragraphs[1:]:
-        tc_elem.remove(extra_p)
-
-    # Preserve run-level formatting (font, size, etc.) from the first existing run.
-    existing_runs = p.findall(qn("w:r"))
-    run_props_copy = None
-    if existing_runs:
-        existing_run_props = existing_runs[0].find(qn("w:rPr"))
-        if existing_run_props is not None:
-            run_props_copy = deepcopy(existing_run_props)
-
-    for run in existing_runs:
-        p.remove(run)
-
-    from lxml import etree
-
-    r = etree.SubElement(p, qn("w:r"))
-    if run_props_copy is not None:
-        r.insert(0, run_props_copy)
-    t = etree.SubElement(r, qn("w:t"))
-    t.text = text
-    t.set(qn("xml:space"), "preserve")
-
-
-def _extract_header_fields_from_ai_text(text: str) -> dict[str, str]:
-    """Extract key: value header fields that appear before the markdown table.
-
-    Looks for lines like 'TAX ID #: 12345' or 'RECORD OWNER: Jane Doe'.
-    """
-    fields: dict[str, str] = {}
-    for line in text.split("\n"):
-        stripped = line.strip()
-        if _is_table_row(stripped) or _is_table_separator(stripped):
-            break  # stop once we hit the table
-        if stripped.startswith("#"):
-            continue  # skip markdown headings
-        if ":" in stripped:
-            key, _, value = stripped.partition(":")
-            key = key.strip()
-            value = value.strip()
-            if key and value:
-                fields[key] = value
-    return fields
-
-
-def _fill_header_fields_in_doc(doc: DocxDocument, fields: dict[str, str]):
-    """Search the template for header field labels and fill in their values.
-
-    Handles two common patterns:
-    1. Paragraph text containing "LABEL:" followed by blanks / underscores.
-    2. Table cells where one cell has the label and the adjacent cell is empty.
-    """
-    if not fields:
-        return
-
-    normalised = {k.upper().strip().rstrip(":"): v for k, v in fields.items()}
-
-    # Pattern 1: paragraphs matching "LABEL:___" or "LABEL:   "
-    for para in doc.paragraphs:
-        for key, value in normalised.items():
-            pattern = re.compile(
-                re.escape(key) + r"\s*:\s*[_\s]*$",
-                re.IGNORECASE,
-            )
-            if pattern.search(para.text):
-                para.text = re.sub(
-                    re.escape(key) + r"(\s*:\s*)[_\s]*$",
-                    key + r"\1" + value,
-                    para.text,
-                    flags=re.IGNORECASE,
-                )
-
-    # Pattern 2: table cells — label cell followed by empty value cell (including nested tables).
-    all_tables = _collect_all_tables(doc)
-    for table in all_tables:
-        for row in table.rows:
-            cells = row.cells
-            for i, cell in enumerate(cells):
-                cell_text = cell.text.strip().rstrip(":").upper()
-                if cell_text in normalised and i + 1 < len(cells):
-                    next_cell = cells[i + 1]
-                    # Only fill cells that are blank or underscore placeholders.
-                    if not next_cell.text.strip() or next_cell.text.strip("_ ") == "":
-                        next_cell.text = normalised[cell_text]
-
-
-def generate_from_docx_template(template_file_field, ai_text: str) -> io.BytesIO:
-    """Clone the original DOCX template and inject AI data rows into its table.
-
-    Preserves all images, formatting, headers, and layout from the template.
-    Only adds new data rows to the existing table structure.
-    """
-    template_file_field.open("rb")
-    data = template_file_field.read()
-    template_file_field.close()
-
-    doc = DocxDocument(io.BytesIO(data))
-
-    data_rows = _extract_data_rows_from_ai_text(ai_text)
-
-    header_fields = _extract_header_fields_from_ai_text(ai_text)
-    _fill_header_fields_in_doc(doc, header_fields)
-
-    if not data_rows:
-        buf = io.BytesIO()
-        doc.save(buf)
-        buf.seek(0)
-        return buf
-
-    target_table = _find_data_table(doc)
-    if not target_table:
-        # Fall back to from-scratch generation when the template has no table.
-        return generate_docx(ai_text)
-
-    # Everything at and before the column header row is preserved; rows after
-    # it are treated as placeholder data rows and replaced.
-    col_header_idx = _find_column_header_row(target_table)
-
-    tmpl_row_idx = _get_template_row(target_table, col_header_idx)
-    template_tr = deepcopy(target_table.rows[tmpl_row_idx]._tr)
-
-    trs_to_remove = []
-    for i in range(col_header_idx + 1, len(target_table.rows)):
-        trs_to_remove.append(target_table.rows[i]._tr)
-    for tr in trs_to_remove:
-        target_table._tbl.remove(tr)
-
-    for row_data in data_rows:
-        new_tr = deepcopy(template_tr)
-        cells = new_tr.findall(qn("w:tc"))
-        for i, tc in enumerate(cells):
-            if i < len(row_data):
-                _set_cell_text_preserving_format(tc, row_data[i])
-            else:
-                _set_cell_text_preserving_format(tc, "")
-        target_table._tbl.append(new_tr)
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf

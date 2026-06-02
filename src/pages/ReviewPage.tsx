@@ -1,12 +1,15 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, FileText, Type, Loader, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileText, Type, Loader, Search, X, Edit3, Upload } from "lucide-react";
 import DOMPurify from "dompurify";
 import { analysesApi } from "../api/analysis";
 import { documentsApi } from "../api/documents";
+import AnalysisUncertainty from "../components/AnalysisUncertainty";
 import DocumentViewer from "../components/DocumentViewer";
-import { parseResultText } from "../utils/markdownTable";
+import ReanalyzeModal from "../components/ReanalyzeModal";
+import ExportModal from "../components/ExportModal";
+import { buildTableFromParsedDocuments } from "../utils/markdownTable";
 import { extractSearchTerms } from "../utils/textHighlight";
 
 export default function ReviewPage() {
@@ -18,6 +21,8 @@ export default function ReviewPage() {
   const [selectedRowIdx, setSelectedRowIdx] = useState<number | null>(null);
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showReanalyze, setShowReanalyze] = useState(false);
+  const [showExport, setShowExport] = useState(false);
 
   const { data: analysis, isLoading: analysisLoading } = useQuery({
     queryKey: ["analysis", analysisId],
@@ -38,9 +43,13 @@ export default function ReviewPage() {
   });
 
   const parsed = useMemo(() => {
-    if (!analysis?.result_text) return null;
-    return parseResultText(analysis.result_text);
-  }, [analysis?.result_text]);
+    if (!analysis) return null;
+    // parsed_documents are present for pipeline-produced rows; legacy rows fall back to null.
+    if ((analysis.parsed_documents?.length ?? 0) > 0) {
+      return buildTableFromParsedDocuments(analysis);
+    }
+    return null;
+  }, [analysis]);
 
   const highlightTerms = useMemo(() => {
     if (selectedRowIdx === null || !parsed) return [];
@@ -131,14 +140,106 @@ export default function ReviewPage() {
         <div className="review-header-meta">
           <span className="review-header-title">
             {analysis.document_name ?? "Analysis Review"}
+            {analysis.revision_kind === "revision" && (
+              <span className="ls-review-revision-badge" title="This is a revision">
+                revision
+              </span>
+            )}
           </span>
           <span className="review-header-detail">
             {new Date(analysis.created_at).toLocaleDateString()}
             {analysis.ai_provider && <> &middot; {analysis.ai_provider}</>}
             {analysis.form_template_name && <> &middot; {analysis.form_template_name}</>}
           </span>
+          <div className="ls-review-revision-row">
+            {analysis.parent_analysis && (
+              <button
+                type="button"
+                className="ls-review-revision-chip"
+                onClick={() => navigate(`/review/${analysis.parent_analysis}`)}
+                title="View the previous version"
+              >
+                <ArrowLeft size={12} /> Previous version
+              </button>
+            )}
+            {(analysis.revisions?.length ?? 0) > 0 && (
+              <details className="ls-review-revisions-dropdown">
+                <summary className="ls-review-revision-chip">
+                  {analysis.revisions.length} revision
+                  {analysis.revisions.length === 1 ? "" : "s"}{" "}
+                  <ArrowRight size={12} />
+                </summary>
+                <ul>
+                  {analysis.revisions.map((r) => (
+                    <li key={r.id}>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/review/${r.id}`)}
+                      >
+                        <span className="ls-review-revision-date">
+                          {new Date(r.created_at).toLocaleString()}
+                        </span>
+                        <span className="ls-review-revision-instr">
+                          {r.revision_instructions
+                            ? r.revision_instructions.length > 80
+                              ? r.revision_instructions.slice(0, 77) + "..."
+                              : r.revision_instructions
+                            : "(no instructions)"}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        </div>
+        <div className="ls-review-header-actions">
+          {analysis.result_text && (
+            <button
+              type="button"
+              className="ls-review-strip-btn"
+              onClick={() => setShowExport(true)}
+              title="Export this analyzed COT — rename, swap PDF/DOCX, optionally drop Doc Pg column"
+            >
+              <Upload size={14} /> Export
+            </button>
+          )}
+          {analysis.pipeline_version && (analysis.parsed_documents?.length ?? 0) > 0 && (
+            <button
+              type="button"
+              className="ls-review-reanalyze-btn"
+              onClick={() => setShowReanalyze(true)}
+            >
+              <Edit3 size={14} /> Re-analyze with changes
+            </button>
+          )}
         </div>
       </div>
+
+      {showReanalyze && (
+        <ReanalyzeModal
+          analysis={analysis}
+          onClose={() => setShowReanalyze(false)}
+          onSubmitted={(newId) => {
+            setShowReanalyze(false);
+            navigate(`/review/${newId}`);
+          }}
+        />
+      )}
+
+      {showExport && (
+        <ExportModal
+          analysisId={analysis.id}
+          defaultBaseName={
+            (analysis.generated_document_name || analysis.document_name || "analysis").replace(/\.(pdf|docx)$/i, "")
+          }
+          sourceFormat={analysis.output_format === "docx" ? "docx" : "pdf"}
+          onClose={() => setShowExport(false)}
+        />
+      )}
+
+      <AnalysisUncertainty analysis={analysis} />
 
       <div className="review-panels">
         <div className="review-panel">

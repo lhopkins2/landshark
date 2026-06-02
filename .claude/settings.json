@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ruff check *)",
+      "Bash(.venv/bin/ruff check *)",
+      "Bash(ruff format *)",
+      "Bash(npm run lint)",
+      "Bash(npm run lint *)",
+      "Bash(journalctl *)",
+      "Bash(ssh -i ~/.ssh/c_shark -o StrictHostKeyChecking=no root@45.55.48.26 *)",
+      "mcp__Claude_Preview__preview_screenshot",
+      "mcp__Claude_Preview__preview_snapshot",
+      "mcp__Claude_Preview__preview_network",
+      "mcp__Claude_Preview__preview_console_logs",
+      "mcp__Claude_Preview__preview_logs",
+      "mcp__Claude_Preview__preview_list"
+    ]
+  }
+}

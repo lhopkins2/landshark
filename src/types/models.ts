@@ -24,6 +24,15 @@ export interface Document {
   uploaded_by: string | null;
   uploaded_by_name: string | null;
   download_url: string | null;
+  /** Set when this document is the generated output of a COTAnalysis. Gates "Export". */
+  analysis_id: string | null;
+  /**
+   * For analyzed-output docs, the source Document the analysis was produced from.
+   * Lets the UI redirect "history" views from the generated doc to the canonical
+   * source doc (which actually owns the analyses list). Null on source docs and
+   * on outputs whose source has been deleted.
+   */
+  source_document_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -61,7 +70,7 @@ export interface UserAnalysisSettings {
   updated_at: string;
 }
 
-type AnalysisStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
+export type AnalysisStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";
 export type AnalysisOrder = "chronological" | "reverse_chronological";
 
 export type OutputFormat = "pdf" | "docx";
@@ -75,10 +84,113 @@ type AnalysisProgressStep =
   | "complete"
   | "failed";
 
+/** A named party on an instrument (grantor or grantee). Mirrors backend `PartyDict`. */
+export interface Party {
+  name: string;
+}
+
+/** Recording-stamp metadata on a parsed instrument. */
+export interface RecordingInfo {
+  reception_number: string;
+  book: string;
+  page: string;
+}
+
+// Mirrors backend pipeline output; keep in sync with apps/analysis/services/instrument_format.py.
+export interface ParsedInstrument {
+  instrument_type: string;
+  instrument_date: string;
+  recording_date: string;
+  recording_info: RecordingInfo;
+  grantors: Party[];
+  grantees: Party[];
+  legal_description: string;
+  subject_premises_relationship: "subject_premises" | "subject_premises_and_more" | "not_subject_premises" | "unknown";
+  encumbrances_created: string[];
+  encumbrances_released: string[];
+  comments: string;
+  start_page: number;
+  end_page: number;
+  notes: string[];
+}
+
+export interface PageStatus {
+  page: number;
+  status: "success" | "failed" | "unknown";
+  error?: string;
+}
+
+export interface ParsedDocument {
+  document_id: string;
+  filename: string;
+  total_pages: number;
+  instruments: ParsedInstrument[];
+  page_statuses: PageStatus[];
+  notes: AnalysisNote[];
+  usage: { input_tokens: number; output_tokens: number };
+  error: string;
+}
+
+export interface AnalysisNote {
+  source: "instrument" | "page" | "chain";
+  page: number;
+  text: string;
+}
+
+export interface ChainEventEntry {
+  type: string;
+  instrument: { index: number; instrument_type: string; instrument_date: string; start_page: number };
+  description?: string;
+}
+
+export interface OpenQuestion {
+  id: string;
+  type: string;
+  related_instrument_indexes: number[];
+  question: string;
+}
+
+export interface ResolvedQuestion {
+  id: string;
+  resolution: string;
+  reasoning: string;
+}
+
+export interface ChainEvents {
+  events: ChainEventEntry[];
+  open_questions: OpenQuestion[];
+  resolved_questions: ResolvedQuestion[];
+}
+
+export type RevisionKind = "full_run" | "revision";
+
+export interface RevisionRef {
+  id: string;
+  created_at: string;
+  revision_instructions: string;
+  status: AnalysisStatus;
+}
+
+export interface ReanalyzeInstrumentEdit {
+  index: number;
+  instrument: ParsedInstrument;
+}
+
+export interface ReanalyzePayload {
+  instrument_edits?: ReanalyzeInstrumentEdit[];
+  pages_to_rescan?: number[];
+  user_instructions?: string;
+  provider?: string;
+  model?: string;
+  output_format?: OutputFormat;
+}
+
 export interface COTAnalysis {
   id: string;
   document: string | null;
   document_name: string | null;
+  /** True when the source Document was deleted after this analysis ran. */
+  document_deleted: boolean;
   form_template: string | null;
   form_template_name: string | null;
   analysis_order: AnalysisOrder;
@@ -92,6 +204,17 @@ export interface COTAnalysis {
   generated_document_name: string | null;
   generated_document_url: string | null;
   progress_step: AnalysisProgressStep;
+  // pipeline_version is empty on rows from before the structured pipeline.
+  pipeline_version: string;
+  parsed_documents: ParsedDocument[] | null;
+  chain_events: ChainEvents | null;
+  narrative: string;
+  notes: AnalysisNote[] | null;
+  failed_pages_count: number;
+  parent_analysis: string | null;
+  revision_instructions: string;
+  revision_kind: RevisionKind;
+  revisions: RevisionRef[];
   created_by: string | null;
   created_at: string;
   updated_at: string;

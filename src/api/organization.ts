@@ -5,9 +5,6 @@ export const orgApi = {
   listMembers: () =>
     apiClient.get<OrgMember[]>("/auth/org/members/"),
 
-  getMember: (id: string) =>
-    apiClient.get<OrgMember>(`/auth/org/members/${id}/`),
-
   createMember: (data: {
     email: string;
     first_name: string;

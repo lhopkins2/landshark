@@ -1,4 +1,6 @@
-from django.db.models import Count
+from typing import Any
+
+from django.db.models import Count, QuerySet
 from django.http import FileResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -20,7 +22,7 @@ class DocumentFolderViewSet(OrgScopedViewMixin, viewsets.ModelViewSet):
     ordering_fields = ["name", "created_at"]
     org_field = "organization"
 
-    def perform_create(self, serializer):
+    def perform_create(self, serializer: Any) -> None:
         org = self.get_org()
         serializer.save(created_by=self.request.user, organization=org if org else None)
 
@@ -32,18 +34,18 @@ class DocumentViewSet(viewsets.ModelViewSet):
     search_fields = ["original_filename", "description", "tract_number", "last_record_holder"]
     ordering_fields = ["original_filename", "created_at", "file_size"]
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Document]:
         qs = org_scoped_documents(self.request.user, base_qs=super().get_queryset())
         if self.request.query_params.get("folder__isnull") == "true":
             qs = qs.filter(folder__isnull=True)
         return qs
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type:
         if self.action == "create":
             return DocumentUploadSerializer
         return DocumentSerializer
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Any, *args: Any, **kwargs: Any) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         document = serializer.save()
@@ -59,7 +61,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    def update(self, request, *args, **kwargs):
+    def update(self, request: Any, *args: Any, **kwargs: Any) -> Response:
         document = self.get_object()
         response = super().update(request, *args, **kwargs)
         changed = {k: v for k, v in request.data.items() if k not in ("file",)}
@@ -72,7 +74,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         )
         return response
 
-    def destroy(self, request, *args, **kwargs):
+    def destroy(self, request: Any, *args: Any, **kwargs: Any) -> Response:
         document = self.get_object()
         log_action(
             action=AuditLog.Action.DELETE,
@@ -83,12 +85,12 @@ class DocumentViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["get"])
-    def download(self, request, pk=None):
+    def download(self, request: Any, pk: str | None = None) -> Any:
         document = self.get_object()
         if not document.file:
             return Response({"detail": "No file attached."}, status=status.HTTP_404_NOT_FOUND)
         response = FileResponse(document.file.open("rb"), content_type=document.mime_type or "application/octet-stream")
-        # Sanitize filename: strip quotes, newlines, and control chars to prevent header injection
+        # Strip quotes/newlines from the filename to prevent Content-Disposition header injection.
         safe_name = document.original_filename.replace('"', "'").replace("\n", "").replace("\r", "")
         disposition = "inline" if request.query_params.get("inline") == "true" else "attachment"
         response["Content-Disposition"] = f'{disposition}; filename="{safe_name}"'
@@ -101,7 +103,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         return response
 
     @action(detail=True, methods=["get"], url_path="extract-text")
-    def extract_text(self, request, pk=None):
+    def extract_text(self, request: Any, pk: str | None = None) -> Response:
         document = self.get_object()
         if not document.file:
             return Response({"detail": "No file attached."}, status=status.HTTP_404_NOT_FOUND)
@@ -111,7 +113,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
         return Response({"text": text})
 
     @action(detail=False, methods=["post"], url_path="move-to-folder")
-    def move_to_folder(self, request):
+    def move_to_folder(self, request: Any) -> Response:
         """Move one or more documents to a folder (or remove from folder with folder_id=null)."""
         doc_ids = request.data.get("document_ids", [])
         folder_id = request.data.get("folder_id")
@@ -122,9 +124,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
         folder = None
         if folder_id:
             try:
-                # Scope folder lookup to user's org via the folder viewset's queryset
                 folder = DocumentFolder.objects.get(id=folder_id)
-                # Verify org ownership for non-developers
+                # Cross-org folder access masquerades as not-found.
                 user = request.user
                 if not getattr(user, "is_developer", False):
                     membership = getattr(user, "membership", None)
@@ -133,6 +134,6 @@ class DocumentViewSet(viewsets.ModelViewSet):
             except DocumentFolder.DoesNotExist:
                 return Response({"detail": "Folder not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Use the org-scoped queryset so users can only move their own documents
+        # org-scoped queryset restricts the bulk update to the requester's documents.
         updated = self.get_queryset().filter(id__in=doc_ids).update(folder=folder)
         return Response({"moved": updated})

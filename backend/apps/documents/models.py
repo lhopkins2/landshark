@@ -1,12 +1,22 @@
+import logging
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.db import models
-from django.db.models import Q
+from django.db.models import Q, QuerySet
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 
 from apps.core.models import TimestampedModel
 
+if TYPE_CHECKING:
+    from apps.accounts.models import User
 
-def _get_org_id(user):
+logger = logging.getLogger(__name__)
+
+
+def _get_org_id(user: "User") -> str:
     """Return the user's organization UUID, or 'unassigned'."""
     membership = getattr(user, "membership", None)
     if membership:
@@ -14,7 +24,7 @@ def _get_org_id(user):
     return "unassigned"
 
 
-def document_upload_path(instance, filename):
+def document_upload_path(instance: "Document", filename: str) -> str:
     """Store documents under org-{uuid}/documents/YYYY/MM/."""
     if instance.chain_of_title:
         org_id = str(instance.chain_of_title.project.client.organization_id)
@@ -47,7 +57,7 @@ class DocumentFolder(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         ordering = ["name"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -83,11 +93,13 @@ class Document(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         pass
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.original_filename
 
 
-def org_scoped_documents(user, base_qs=None):
+def org_scoped_documents(
+    user: "User", base_qs: QuerySet["Document"] | None = None
+) -> QuerySet["Document"]:
     """Return a Document queryset scoped to the user's organization.
 
     Developers see everything. Users with no membership see nothing.
@@ -106,3 +118,19 @@ def org_scoped_documents(user, base_qs=None):
         Q(chain_of_title__project__client__organization=org)
         | Q(chain_of_title__isnull=True, uploaded_by__membership__organization=org)
     )
+
+
+@receiver(post_delete, sender=Document)
+def _delete_document_file_from_storage(sender, instance: Document, **kwargs) -> None:
+    """Remove the underlying file from storage when a Document row is deleted.
+
+    Django's FileField does NOT delete files on row deletion by default,
+    leaving orphans in MEDIA_ROOT (or S3). Fires on direct deletes and cascades alike.
+    """
+    if not instance.file:
+        return
+    try:
+        instance.file.delete(save=False)
+    except Exception:
+        # A missing file or transient storage hiccup shouldn't block the DB delete.
+        logger.warning("Failed to delete file for Document %s from storage", instance.pk, exc_info=True)

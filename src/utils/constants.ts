@@ -21,8 +21,11 @@ export const AI_MODELS: Record<string, Record<string, string>> = {
     "o3-mini": "o3 Mini",
   },
   gemini: {
-    "gemini-2.5-flash": "Gemini 2.5 Flash",
-    "gemini-2.5-pro": "Gemini 2.5 Pro",
+    // Flash is recommended — ~4× cheaper than Pro and equivalent on modern typed docs.
+    // Pro is worth selecting for heavy cursive / 1800s handwritten deeds.
+    "gemini-2.5-flash": "Gemini 2.5 Flash (recommended — lowest cost)",
+    "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite (cheapest)",
+    "gemini-2.5-pro": "Gemini 2.5 Pro (best for cursive / damaged scans)",
     "gemini-2.0-flash": "Gemini 2.0 Flash",
   },
 } as const;

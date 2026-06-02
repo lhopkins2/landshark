@@ -21,8 +21,7 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Mutex for token refresh — prevents concurrent 401 handlers from each
-// trying to refresh (and blacklisting) the same token.
+// Mutex: concurrent 401s share a single refresh attempt so we don't burn the refresh token.
 let refreshPromise: Promise<string> | null = null;
 
 apiClient.interceptors.response.use(

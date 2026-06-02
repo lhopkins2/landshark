@@ -16,6 +16,7 @@ dependencies = [
     "openai>=1.50,<2.0",
     "google-generativeai>=0.8,<1.0",
     "fpdf2>=2.8,<3.0",
+    "python-dateutil>=2.8,<3.0",
     # Production
     "gunicorn>=22.0,<24.0",
     "psycopg2-binary>=2.9,<3.0",

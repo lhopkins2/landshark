@@ -13,7 +13,7 @@ class Organization(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         pass
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -32,7 +32,7 @@ class User(AbstractUser):
     class Meta:
         ordering = ["email"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.email
 
 
@@ -59,5 +59,5 @@ class Membership(TimestampedModel):
             models.UniqueConstraint(fields=["user"], name="unique_user_membership"),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.user.email} - {self.role} @ {self.organization.name}"

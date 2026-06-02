@@ -1,3 +1,5 @@
+from typing import Any
+
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -20,7 +22,7 @@ from .serializers import (
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
-    def post(self, request):
+    def post(self, request: Any) -> Response:
         serializer = LoginSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
@@ -39,7 +41,7 @@ class TokenRefreshAPIView(TokenRefreshView):
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
+    def post(self, request: Any) -> Response:
         refresh_token = request.data.get("refresh")
         if not refresh_token:
             return Response(status=status.HTTP_205_RESET_CONTENT)
@@ -57,16 +59,16 @@ class LogoutView(APIView):
 class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         return Response(UserSerializer(request.user).data)
 
 
 class OrgMemberListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsOrgAdmin]
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         if getattr(request.user, "is_developer", False) and not get_user_organization(request.user):
-            # Developers without a membership see all members
+            # Unaffiliated developers see every membership across the system.
             members = Membership.objects.select_related("user", "organization").order_by("user__email")
         else:
             org = get_user_organization(request.user)
@@ -75,7 +77,7 @@ class OrgMemberListCreateView(APIView):
             members = Membership.objects.filter(organization=org).select_related("user").order_by("user__email")
         return Response(MemberSerializer(members, many=True).data)
 
-    def post(self, request):
+    def post(self, request: Any) -> Response:
         org = get_user_organization(request.user)
         if not org:
             return Response({"detail": "No organization found."}, status=status.HTTP_400_BAD_REQUEST)
@@ -90,32 +92,30 @@ class OrgMemberListCreateView(APIView):
 class OrgMemberDetailView(APIView):
     permission_classes = [IsAuthenticated, IsOrgAdmin]
 
-    def _get_membership(self, request, pk):
-        """Get a membership by its UUID PK, scoped to the requesting user's org."""
+    def _get_membership(self, request: Any, pk: str) -> Membership | None:
+        """Get a membership by PK, scoped to the requester's org (developers see all)."""
         try:
             membership = Membership.objects.select_related("user", "organization").get(pk=pk)
         except Membership.DoesNotExist:
             return None
-        # Developers can access any membership
         if getattr(request.user, "is_developer", False):
             return membership
-        # Non-developers can only access members in their own org
         requesting_org = get_user_organization(request.user)
         if requesting_org is None or membership.organization != requesting_org:
             return None
         return membership
 
-    def get(self, request, pk):
+    def get(self, request: Any, pk: str) -> Response:
         membership = self._get_membership(request, pk)
         if not membership:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(MemberSerializer(membership).data)
 
-    def patch(self, request, pk):
+    def patch(self, request: Any, pk: str) -> Response:
         membership = self._get_membership(request, pk)
         if not membership:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        # Prevent self-modification of role or active status
+        # Prevent self-modification of role or active status to avoid admin lockouts.
         if membership.user == request.user:
             if request.data.get("role") == "operator":
                 return Response({"detail": "You cannot change your own role."}, status=status.HTTP_400_BAD_REQUEST)
@@ -128,7 +128,7 @@ class OrgMemberDetailView(APIView):
         serializer.update(membership, serializer.validated_data)
         return Response(MemberSerializer(membership).data)
 
-    def delete(self, request, pk):
+    def delete(self, request: Any, pk: str) -> Response:
         membership = self._get_membership(request, pk)
         if not membership:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)

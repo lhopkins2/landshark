@@ -1,17 +1,22 @@
 import io
 import re
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
-# Lower DPI and page cap reduce peak memory usage during PDF rendering.
-# At 100 DPI a US-Letter page is ~720×936px — plenty of detail for vision models.
-# 40 pages covers the vast majority of title chain documents; beyond that the AI
-# context window is the real limiting factor anyway.
+# 100 DPI keeps peak memory and per-page token cost reasonable while staying
+# readable for stamps, signatures, and cursive (~720×936px on US-Letter).
+# 150 pages is a practical cap; beyond that the provider context window is the real limit.
 IMAGE_DPI = 100
-MAX_PAGES_REDUCED = 40
+MAX_PAGES_REDUCED = 150
 
 
-def extract_text_from_file(file_field):
-    """Extract text content from a PDF, DOCX, or TXT file."""
+def extract_text_from_file(file_field: Any) -> str:
+    """Extract text from a PDF, DOCX, or TXT file.
+
+    `file_field` is duck-typed: anything with `.name`, `.open(mode)`, `.read()`,
+    `.close()` (Django `FieldFile` in production).
+    """
     filename = file_field.name.lower()
 
     if filename.endswith(".pdf"):
@@ -20,14 +25,14 @@ def extract_text_from_file(file_field):
         return _extract_docx_text(file_field)
     elif filename.endswith(".txt"):
         file_field.open("rb")
-        content = file_field.read().decode("utf-8", errors="replace")
+        content: str = file_field.read().decode("utf-8", errors="replace")
         file_field.close()
         return content
     else:
         raise ValueError(f"Unsupported file type: {Path(filename).suffix}")
 
 
-def _extract_pdf_text(file_field):
+def _extract_pdf_text(file_field: Any) -> str:
     import pymupdf
 
     file_field.open("rb")
@@ -45,23 +50,27 @@ def _extract_pdf_text(file_field):
             stripped = line.strip()
             if len(stripped) <= 20:
                 continue
-            # Skip browser chrome: URLs, page indicators, timestamps.
+            # Drop browser chrome (URLs, "page X of Y") so it doesn't dominate the count.
             if re.search(r"https?://|\.com|\.aspx|\.pdf|\d+\s+of\s+\d+", stripped, re.IGNORECASE):
                 continue
             total_meaningful_chars += len(stripped)
 
-    # No OCR fallback here — vision-based analysis handles scanned PDFs
-    # directly via page images sent to the AI model.
+    # Scanned PDFs are handled by the vision pipeline (render_pdf_pages), not OCR here.
 
     doc.close()
     return "\n".join(text_parts)
 
 
-def render_pdf_pages(file_field, dpi=IMAGE_DPI, max_pages=None):
-    """Render PDF pages as PNG images for vision-based analysis.
+def render_pdf_pages(
+    file_field: Any,
+    dpi: int = IMAGE_DPI,
+    max_pages: int | None = None,
+    page_indexes: Iterable[int] | None = None,
+) -> tuple[list[tuple[int, bytes]], int]:
+    """Render PDF pages as PNGs for vision analysis.
 
-    Returns a list of (page_number, png_bytes) tuples and the total page count.
-    page_number is 1-indexed.
+    Returns (list of (page_number, png_bytes), total_pages). page_number is 1-indexed.
+    If page_indexes is given, only those pages are rendered (max_pages is ignored).
     """
     import pymupdf
 
@@ -71,27 +80,36 @@ def render_pdf_pages(file_field, dpi=IMAGE_DPI, max_pages=None):
 
     doc = pymupdf.open(stream=data, filetype="pdf")
     total_pages = len(doc)
-    render_count = min(total_pages, max_pages) if max_pages else total_pages
+
+    if page_indexes is not None:
+        seen = set()
+        target = []
+        for p in page_indexes:
+            try:
+                p = int(p)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= p <= total_pages and p not in seen:
+                seen.add(p)
+                target.append(p)
+    else:
+        render_count = min(total_pages, max_pages) if max_pages else total_pages
+        target = list(range(1, render_count + 1))
 
     pages = []
-    for i in range(render_count):
-        page = doc[i]
+    for page_num in target:
+        page = doc[page_num - 1]
         pixmap = page.get_pixmap(dpi=dpi)
         png_bytes = pixmap.tobytes("png")
-        pages.append((i + 1, png_bytes))
+        pages.append((page_num, png_bytes))
 
     doc.close()
     return pages, total_pages
 
 
-def is_pdf(file_field):
-    """Check if a file is a PDF (eligible for vision-based analysis)."""
-    return file_field.name.lower().endswith(".pdf")
-
-
-def _extract_table_rows(table):
-    """Extract rows from a table, recursing into nested tables in cells."""
-    rows = []
+def _extract_table_rows(table: Any) -> list[str]:
+    """Flatten a docx table to text rows, recursing into nested tables."""
+    rows: list[str] = []
     for row in table.rows:
         has_nested = any(cell.tables for cell in row.cells)
         if has_nested:
@@ -99,7 +117,7 @@ def _extract_table_rows(table):
                 for nested_table in cell.tables:
                     rows.extend(_extract_table_rows(nested_table))
         else:
-            # Deduplicate merged cells: adjacent cells with identical text.
+            # python-docx returns the same text in every merged cell — dedupe adjacent dupes.
             seen = []
             for cell in row.cells:
                 text = cell.text.strip().replace("\n", " ")
@@ -111,7 +129,7 @@ def _extract_table_rows(table):
     return rows
 
 
-def _extract_docx_text(file_field):
+def _extract_docx_text(file_field: Any) -> str:
     from docx import Document as DocxDocument
 
     file_field.open("rb")

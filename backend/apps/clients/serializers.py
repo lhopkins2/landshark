@@ -22,7 +22,7 @@ class ChainOfTitleDetailSerializer(ChainOfTitleSerializer):
     class Meta(ChainOfTitleSerializer.Meta):
         fields = ChainOfTitleSerializer.Meta.fields + ["documents"]
 
-    def get_documents(self, obj):
+    def get_documents(self, obj: ChainOfTitle) -> list[dict[str, object]]:
         from apps.documents.serializers import DocumentSerializer
         return DocumentSerializer(obj.documents.all(), many=True, context={"request": self.context.get("request")}).data
 

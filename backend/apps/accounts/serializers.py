@@ -1,3 +1,5 @@
+from typing import Any
+
 from django.contrib.auth import authenticate
 from django.db import transaction
 from rest_framework import serializers
@@ -20,7 +22,7 @@ class UserSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "email", "is_verified"]
 
-    def _get_membership(self, obj):
+    def _get_membership(self, obj: User) -> Membership | None:
         # Cache on the instance to avoid repeated DB hits per serializer method
         cache_attr = "_cached_membership"
         if not hasattr(obj, cache_attr):
@@ -30,19 +32,19 @@ class UserSerializer(serializers.ModelSerializer):
                 setattr(obj, cache_attr, None)
         return getattr(obj, cache_attr)
 
-    def get_role(self, obj):
+    def get_role(self, obj: User) -> str | None:
         m = self._get_membership(obj)
         return m.role if m else None
 
-    def get_organization_id(self, obj):
+    def get_organization_id(self, obj: User) -> str | None:
         m = self._get_membership(obj)
         return str(m.organization_id) if m else None
 
-    def get_organization_name(self, obj):
+    def get_organization_name(self, obj: User) -> str | None:
         m = self._get_membership(obj)
         return m.organization.name if m else None
 
-    def get_has_api_key_access(self, obj):
+    def get_has_api_key_access(self, obj: User) -> bool:
         if obj.is_developer:
             return True
         m = self._get_membership(obj)
@@ -50,14 +52,14 @@ class UserSerializer(serializers.ModelSerializer):
             return False
         if m.role == "admin":
             return True
-        return m.has_api_key_access
+        return bool(m.has_api_key_access)
 
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
 
-    def validate(self, attrs):
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         request = self.context.get("request")
         user = authenticate(request=request, email=attrs["email"], password=attrs["password"])
         if not user:
@@ -92,28 +94,27 @@ class CreateMemberSerializer(serializers.Serializer):
     has_api_key_access = serializers.BooleanField(default=False)
     is_developer = serializers.BooleanField(default=False, required=False)
 
-    def validate_email(self, value):
+    def validate_email(self, value: str) -> str:
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return value
 
-    def validate_is_developer(self, value):
+    def validate_is_developer(self, value: bool) -> bool:
         if value and not getattr(self.context.get("request_user"), "is_developer", False):
             raise serializers.ValidationError("Only developers can create developer accounts.")
         return value
 
-    def validate(self, attrs):
-        # Admins always have API key access
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        # Admins implicitly get API key access; developers are forced to admin+access.
         if attrs["role"] == "admin":
             attrs["has_api_key_access"] = True
-        # Developers always get admin role and API access
         if attrs.get("is_developer"):
             attrs["role"] = "admin"
             attrs["has_api_key_access"] = True
         return attrs
 
     @transaction.atomic
-    def create(self, validated_data):
+    def create(self, validated_data: dict[str, Any]) -> Membership:
         org = self.context["organization"]
         user = User.objects.create_user(
             email=validated_data["email"],
@@ -138,10 +139,9 @@ class UpdateMemberSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(required=False)
 
     @transaction.atomic
-    def update(self, membership, validated_data):
+    def update(self, membership: Membership, validated_data: dict[str, Any]) -> Membership:
         if "role" in validated_data:
             membership.role = validated_data["role"]
-            # Admins always have API key access
             if validated_data["role"] == "admin":
                 membership.has_api_key_access = True
         if "has_api_key_access" in validated_data and membership.role != "admin":

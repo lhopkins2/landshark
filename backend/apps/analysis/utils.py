@@ -9,23 +9,14 @@ logger = logging.getLogger(__name__)
 STALE_ANALYSIS_TIMEOUT = 660  # 11 minutes (slightly above Q_CLUSTER retry of 660s)
 
 
-def is_qcluster_running():
-    """Check if at least one Django-Q2 cluster is alive.
+def is_qcluster_running() -> bool:
+    """Detect a live Django-Q2 worker. Tries three strategies in order:
 
-    Detection strategy (all DB-based, cross-process safe):
-
-    1. Stat.get_all() — Django-Q2's built-in stat reporting. Works when a shared
-       cache backend (Redis, memcached, DB cache) is configured. Does NOT work with
-       the default LocMemCache because each process has its own memory.
-
-    2. Recent Success — a task completed in the DB recently, so the worker was alive.
-
-    3. Queue heuristic (ORM broker) — if the task queue is empty, there is no evidence
-       the worker is down, so we give the benefit of the doubt and allow the analysis
-       to proceed. The stale-analysis recovery (11 min timeout) is the safety net.
-       If tasks ARE queued but none are being picked up, the worker is likely dead.
+    1. Stat.get_all() — works with a shared cache (Redis/memcached/DB), not LocMemCache.
+    2. Any Success row in the last 5 minutes — DB-based and cross-process safe.
+    3. ORM-queue heuristic — empty queue gets the benefit of the doubt (stale-analysis
+       timeout is the safety net); a queue with no locked tasks means the worker is dead.
     """
-    # Strategy 1: Django-Q2 Stat (cache-based)
     try:
         from django_q.status import Stat
 
@@ -34,7 +25,6 @@ def is_qcluster_running():
     except Exception:
         pass
 
-    # Strategy 2: any task completed in the last 5 minutes (DB, cross-process)
     try:
         from django_q.models import Success
 
@@ -44,24 +34,17 @@ def is_qcluster_running():
     except Exception:
         pass
 
-    # Strategy 3: queue heuristic (ORM broker only)
     try:
         from django_q.models import OrmQ
 
         queued_count = OrmQ.objects.count()
         if queued_count == 0:
-            # Queue is empty — no evidence worker is down. Allow the request.
-            # If worker truly isn't running, the stale analysis timeout catches it.
             return True
 
-        # Tasks are queued. If none are locked (being processed), the worker
-        # isn't picking them up — it's likely dead.
         locked_count = OrmQ.objects.filter(lock__isnull=False).count()
         if locked_count > 0:
-            # At least one task is being worked on
             return True
 
-        # Unlocked tasks sitting in queue with no recent completions = worker is dead
         return False
     except Exception:
         pass
@@ -69,11 +52,10 @@ def is_qcluster_running():
     return False
 
 
-def recover_stale_analyses():
-    """Mark analyses stuck in 'processing' beyond the timeout as failed.
+def recover_stale_analyses() -> int:
+    """Mark analyses stuck in 'processing' beyond STALE_ANALYSIS_TIMEOUT as failed.
 
-    This is called on every analysis poll so that stuck tasks are cleaned up
-    automatically even if no one is actively monitoring.
+    Called from every analysis poll so stuck tasks self-heal without an admin watching.
     """
     from .models import COTAnalysis
 
@@ -89,4 +71,32 @@ def recover_stale_analyses():
     )
     if count:
         logger.warning("Auto-failed %d stale analyses that exceeded %ds timeout.", count, STALE_ANALYSIS_TIMEOUT)
+    return count
+
+
+# Anything PROCESSING from before this boot is stranded (worker is gone).
+STARTUP_RECOVERY_CUTOFF_SECONDS = 30
+
+
+def recover_stale_analyses_at_startup() -> int:
+    """Mark all PROCESSING analyses older than STARTUP_RECOVERY_CUTOFF_SECONDS as failed.
+
+    Called once per server boot from `AnalysisConfig.ready()`. Retryable work
+    isn't lost — `run_analysis_task` resets FAILED → PROCESSING when qcluster picks it up.
+    """
+    from .models import COTAnalysis
+
+    cutoff = timezone.now() - datetime.timedelta(seconds=STARTUP_RECOVERY_CUTOFF_SECONDS)
+    stale = COTAnalysis.objects.filter(
+        status=COTAnalysis.Status.PROCESSING,
+        updated_at__lt=cutoff,
+    )
+    count = stale.update(
+        status=COTAnalysis.Status.FAILED,
+        progress_step=COTAnalysis.ProgressStep.FAILED,
+        error_message=(
+            "Analysis was interrupted by a backend restart. "
+            "Please run the analysis again."
+        ),
+    )
     return count

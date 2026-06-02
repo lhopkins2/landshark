@@ -1,99 +1,35 @@
 import base64
+import json
+import re
 import threading
-from pathlib import Path
-
-from django.conf import settings as django_settings
-
-PROMPT_FILE = Path(django_settings.BASE_DIR) / "prompts" / "cot_analysis.txt"
-
-# Document content marker in the prompt template — everything after this
-# is injected programmatically as image or text content blocks.
-_DOCUMENT_SECTION = "## DOCUMENT CONTENT"
+from typing import Any, TypedDict
 
 
-def load_prompt_template():
-    return PROMPT_FILE.read_text(encoding="utf-8")
+class UsageDict(TypedDict):
+    """Token-usage counters returned by every provider call."""
+
+    input_tokens: int
+    output_tokens: int
 
 
-def build_prompt_content(
-    page_images,
-    document_text,
-    analysis_order,
-    custom_request="",
-    legal_description="",
-    total_pages=0,
-):
-    """Build structured content blocks for the LLM.
+class ContentBlock(TypedDict, total=False):
+    """Provider-agnostic content block.
 
-    Returns a list of content blocks in a provider-agnostic intermediate format:
-        {"type": "text", "text": "..."}
-        {"type": "image", "data": b"...", "media_type": "image/png"}
-
-    page_images: list of (page_number, png_bytes) tuples from render_pdf_pages()
-    document_text: extracted text string (used as fallback/supplement or primary for non-PDFs)
-    total_pages: total page count of the original document (for truncation messaging)
+    `type` is "text" or "image". Text blocks carry `text`; image blocks carry
+    raw `data` bytes and `media_type` ("image/png").
     """
-    template = load_prompt_template()
-    order_label = (
-        "chronological order (oldest to newest)"
-        if analysis_order == "chronological"
-        else "reverse chronological order (newest to oldest)"
-    )
 
-    # Split template at the document content section
-    if _DOCUMENT_SECTION in template:
-        preamble = template[: template.index(_DOCUMENT_SECTION)].rstrip()
-    else:
-        preamble = template
+    type: str
+    text: str
+    data: bytes
+    media_type: str
 
-    # Substitute template variables in the preamble (use str.replace to avoid
-    # crashes when user-supplied legal_description or custom_request contain braces)
-    preamble = preamble.replace("{analysis_order}", order_label)
-    preamble = preamble.replace(
-        "{legal_description}",
-        legal_description.strip() if legal_description else "(No legal description provided.)",
-    )
-    preamble = preamble.replace(
-        "{custom_request}",
-        custom_request.strip() if custom_request else "(No custom request provided.)",
-    )
 
-    content = []
+class ModelInfo(TypedDict):
+    """One entry returned by `list_*_models`."""
 
-    if page_images:
-        # Vision mode: prompt preamble + page images
-        content.append({"type": "text", "text": preamble})
-        content.append({
-            "type": "text",
-            "text": (
-                f"## DOCUMENT CONTENT\n\n"
-                f"The following {len(page_images)} page(s) are images of the document. "
-                f"Examine each page carefully for all visual details including stamps, "
-                f"handwriting, margin annotations, struck text, and other markings."
-            ),
-        })
-
-        for page_num, png_bytes in page_images:
-            content.append({"type": "text", "text": f"--- Page {page_num} of {total_pages} ---"})
-            content.append({"type": "image", "data": png_bytes, "media_type": "image/png"})
-
-        # If the document was truncated, include remaining pages as text
-        rendered_count = len(page_images)
-        if rendered_count < total_pages and document_text:
-            content.append({
-                "type": "text",
-                "text": (
-                    f"## SUPPLEMENTARY TEXT (Pages {rendered_count + 1}–{total_pages})\n\n"
-                    f"The remaining pages could not be sent as images due to context limits. "
-                    f"Their extracted text is provided below:\n\n{document_text}"
-                ),
-            })
-    else:
-        # Text-only mode: inject document text directly into the prompt
-        full_prompt = preamble + f"\n\n---\n\n## DOCUMENT CONTENT\n\n{document_text}"
-        content.append({"type": "text", "text": full_prompt})
-
-    return content
+    id: str
+    name: str
 
 
 DEFAULT_MODELS = {
@@ -107,22 +43,20 @@ LARGE_DOC_MAX_TOKENS = 16384
 LARGE_DOC_PAGE_THRESHOLD = 30
 AI_CALL_TIMEOUT = 480  # 8 minutes — fail fast instead of hanging indefinitely
 
-# Lock for Gemini API calls — genai.configure() mutates global state,
-# so concurrent calls with different API keys must be serialized.
+# genai.configure() mutates global SDK state, so concurrent calls with different keys must serialize.
 _gemini_lock = threading.Lock()
 
 
-def _max_tokens_for_content(content):
-    """Scale max_tokens based on whether the request includes many images."""
+def _max_tokens_for_content(content: list[ContentBlock]) -> int:
+    """Scale max_tokens up for requests with many images."""
     image_count = sum(1 for b in content if b.get("type") == "image")
     if image_count >= LARGE_DOC_PAGE_THRESHOLD:
         return LARGE_DOC_MAX_TOKENS
     return DEFAULT_MAX_TOKENS
 
 
-def _format_anthropic(content_blocks):
-    """Convert intermediate content blocks to Anthropic message format."""
-    parts = []
+def _format_anthropic(content_blocks: list[ContentBlock]) -> list[dict[str, Any]]:
+    parts: list[dict[str, Any]] = []
     for block in content_blocks:
         if block["type"] == "text":
             parts.append({"type": "text", "text": block["text"]})
@@ -139,9 +73,8 @@ def _format_anthropic(content_blocks):
     return parts
 
 
-def _format_openai(content_blocks):
-    """Convert intermediate content blocks to OpenAI message format."""
-    parts = []
+def _format_openai(content_blocks: list[ContentBlock]) -> list[dict[str, Any]]:
+    parts: list[dict[str, Any]] = []
     for block in content_blocks:
         if block["type"] == "text":
             parts.append({"type": "text", "text": block["text"]})
@@ -155,9 +88,8 @@ def _format_openai(content_blocks):
     return parts
 
 
-def _format_gemini(content_blocks):
-    """Convert intermediate content blocks to Gemini parts list."""
-    parts = []
+def _format_gemini(content_blocks: list[ContentBlock]) -> list[Any]:
+    parts: list[Any] = []
     for block in content_blocks:
         if block["type"] == "text":
             parts.append(block["text"])
@@ -166,89 +98,173 @@ def _format_gemini(content_blocks):
     return parts
 
 
-def call_anthropic(content, api_key, model=""):
-    """Call Anthropic Claude API with text or vision content."""
+def _is_openai_reasoning_model(model_id: str) -> bool:
+    """True for o1/o3/o4 series, which have different kwargs than chat models."""
+    return model_id.startswith(("o1", "o3", "o4"))
+
+
+# Structured-JSON calls used by Stage 1 / Stage 2 of the pipeline. Each provider
+# has a *_json call; run_structured_analysis dispatches and parses with a single retry.
+
+
+_CODE_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _strip_json_fences(text: str) -> str:
+    """Drop ```json fences a model may emit despite the system prompt."""
+    return _CODE_FENCE_RE.sub("", text).strip()
+
+
+def call_anthropic_json(content: list[ContentBlock], api_key: str, model: str = "") -> tuple[str, UsageDict]:
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key, timeout=AI_CALL_TIMEOUT)
     message = client.messages.create(
         model=model or DEFAULT_MODELS["anthropic"],
         max_tokens=_max_tokens_for_content(content),
+        system="You return only strict JSON. No prose, no markdown fences, no commentary.",
         messages=[{"role": "user", "content": _format_anthropic(content)}],
     )
     if not message.content:
         raise ValueError("Anthropic returned an empty response.")
-    usage = {"input_tokens": message.usage.input_tokens, "output_tokens": message.usage.output_tokens}
+    usage: UsageDict = {
+        "input_tokens": message.usage.input_tokens,
+        "output_tokens": message.usage.output_tokens,
+    }
     return message.content[0].text, usage
 
 
-def _is_openai_reasoning_model(model_id):
-    """Return True if the model is an OpenAI reasoning model (o1, o3, o4 series)."""
-    return model_id.startswith(("o1", "o3", "o4"))
-
-
-def call_openai(content, api_key, model=""):
-    """Call OpenAI GPT API with text or vision content."""
+def call_openai_json(content: list[ContentBlock], api_key: str, model: str = "") -> tuple[str, UsageDict]:
+    """OpenAI JSON-mode call. Falls back to plain output for reasoning models, which don't support response_format."""
     import openai
 
     resolved_model = model or DEFAULT_MODELS["openai"]
     client = openai.OpenAI(api_key=api_key, timeout=AI_CALL_TIMEOUT)
 
-    # Reasoning models (o1/o3/o4) require max_completion_tokens instead of max_tokens
     token_limit = _max_tokens_for_content(content)
-    if _is_openai_reasoning_model(resolved_model):
-        token_kwargs = {"max_completion_tokens": token_limit}
+    is_reasoning = _is_openai_reasoning_model(resolved_model)
+    kwargs: dict[str, Any] = {
+        "model": resolved_model,
+        "messages": [{"role": "user", "content": _format_openai(content)}],
+    }
+    if is_reasoning:
+        kwargs["max_completion_tokens"] = token_limit
     else:
-        token_kwargs = {"max_tokens": token_limit}
+        kwargs["max_tokens"] = token_limit
+        kwargs["response_format"] = {"type": "json_object"}
 
-    response = client.chat.completions.create(
-        model=resolved_model,
-        messages=[{"role": "user", "content": _format_openai(content)}],
-        **token_kwargs,
-    )
+    response = client.chat.completions.create(**kwargs)
     if not response.choices or not response.choices[0].message.content:
         raise ValueError("OpenAI returned an empty response.")
-    usage = {"input_tokens": 0, "output_tokens": 0}
+    usage: UsageDict = {"input_tokens": 0, "output_tokens": 0}
     if response.usage:
         usage["input_tokens"] = response.usage.prompt_tokens or 0
         usage["output_tokens"] = response.usage.completion_tokens or 0
     return response.choices[0].message.content, usage
 
 
-def call_gemini(content, api_key, model=""):
-    """Call Google Gemini API with text or vision content."""
+def call_gemini_json(
+    content: list[ContentBlock],
+    api_key: str,
+    model: str = "",
+    thinking_budget: int | None = None,
+) -> tuple[str, UsageDict]:
+    """Gemini JSON-output call. thinking_budget=0 disables internal thinking on Gemini 2.5+.
+
+    Pre-2.5 SDKs reject `thinking_config`; on rejection we retry without it (paying
+    for thinking tokens) so the call still succeeds.
+    """
     import google.generativeai as genai
 
-    with _gemini_lock:
+    base_config: dict[str, Any] = {"response_mime_type": "application/json"}
+    full_config: dict[str, Any] = dict(base_config)
+    if thinking_budget is not None:
+        full_config["thinking_config"] = {"thinking_budget": int(thinking_budget)}
+
+    def _attempt(generation_config: dict[str, Any]) -> Any:
         genai.configure(api_key=api_key)
-        genai_model = genai.GenerativeModel(model or DEFAULT_MODELS["gemini"])
-        response = genai_model.generate_content(
+        genai_model = genai.GenerativeModel(
+            model or DEFAULT_MODELS["gemini"],
+            generation_config=generation_config,
+        )
+        return genai_model.generate_content(
             _format_gemini(content),
             request_options={"timeout": AI_CALL_TIMEOUT},
         )
-    usage = {"input_tokens": 0, "output_tokens": 0}
+
+    with _gemini_lock:
+        try:
+            response = _attempt(full_config)
+        except Exception as exc:
+            # Older SDKs surface "Unknown field" for thinking_config — strip and retry.
+            if "thinking_config" in full_config and "thinking_config" in str(exc):
+                response = _attempt(base_config)
+            else:
+                raise
+    usage: UsageDict = {"input_tokens": 0, "output_tokens": 0}
     if hasattr(response, "usage_metadata") and response.usage_metadata:
         usage["input_tokens"] = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
         usage["output_tokens"] = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
     return response.text, usage
 
 
-PROVIDER_FUNCTIONS = {
-    "anthropic": call_anthropic,
-    "openai": call_openai,
-    "gemini": call_gemini,
+JSON_PROVIDER_FUNCTIONS = {
+    "anthropic": call_anthropic_json,
+    "openai": call_openai_json,
+    "gemini": call_gemini_json,
 }
 
 
-def run_analysis(content, provider, api_key, model=""):
-    """Dispatch to the correct AI provider. Returns (result_text, usage_dict)."""
-    func = PROVIDER_FUNCTIONS.get(provider)
+def run_structured_analysis(
+    content: list[ContentBlock],
+    provider: str,
+    api_key: str,
+    model: str = "",
+    thinking_budget: int | None = None,
+) -> tuple[Any, UsageDict]:
+    """Call the provider expecting strict JSON. Returns (parsed_obj, usage_dict).
+
+    The parsed object is whatever `json.loads` produced — typically a dict, but the
+    contract with downstream callers is documented per call site (they all
+    `isinstance(parsed, dict)`-check first), hence the `Any` return type here.
+
+    Retries once on JSON parse failure. Raises ValueError if both attempts fail.
+    Usage tokens are summed across attempts.
+
+    thinking_budget: Gemini 2.5+ only. 0 disables internal thinking, saving output tokens
+    on mechanical tasks. Currently no-op for Anthropic / OpenAI.
+    """
+    func = JSON_PROVIDER_FUNCTIONS.get(provider)
     if not func:
         raise ValueError(f"Unknown provider: {provider}")
-    return func(content, api_key, model)
+
+    # Only Gemini accepts thinking_budget today; other providers' signatures don't take it.
+    kwargs: dict[str, Any] = {}
+    if provider == "gemini" and thinking_budget is not None:
+        kwargs["thinking_budget"] = thinking_budget
+
+    total_usage: UsageDict = {"input_tokens": 0, "output_tokens": 0}
+    last_error: json.JSONDecodeError | None = None
+    last_text = ""
+
+    for _ in range(2):
+        text, usage = func(content, api_key, model, **kwargs)
+        total_usage["input_tokens"] += usage.get("input_tokens", 0)
+        total_usage["output_tokens"] += usage.get("output_tokens", 0)
+        last_text = text
+
+        try:
+            parsed = json.loads(_strip_json_fences(text))
+            return parsed, total_usage
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+
+    snippet = last_text[:500] if last_text else "(empty)"
+    raise ValueError(f"Provider returned invalid JSON after retry: {last_error}. First 500 chars: {snippet}")
 
 
-def list_anthropic_models(api_key):
+def list_anthropic_models(api_key: str) -> list[ModelInfo]:
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -278,7 +294,7 @@ OPENAI_DISPLAY_NAMES = {
 }
 
 
-def _openai_display_name(model_id):
+def _openai_display_name(model_id: str) -> str:
     if model_id in OPENAI_DISPLAY_NAMES:
         return OPENAI_DISPLAY_NAMES[model_id]
     base = model_id
@@ -292,12 +308,12 @@ def _openai_display_name(model_id):
     return model_id
 
 
-def list_openai_models(api_key):
+def list_openai_models(api_key: str) -> list[ModelInfo]:
     import openai
 
     client = openai.OpenAI(api_key=api_key)
     response = client.models.list()
-    models = [
+    models: list[ModelInfo] = [
         {"id": m.id, "name": _openai_display_name(m.id)}
         for m in response.data
         if m.id.startswith(("gpt-", "o1", "o3", "o4"))
@@ -306,12 +322,12 @@ def list_openai_models(api_key):
     return models
 
 
-def list_gemini_models(api_key):
+def list_gemini_models(api_key: str) -> list[ModelInfo]:
     import google.generativeai as genai
 
     with _gemini_lock:
         genai.configure(api_key=api_key)
-        models = [
+        models: list[ModelInfo] = [
             {"id": m.name.replace("models/", ""), "name": m.display_name or m.name}
             for m in genai.list_models()
             if "generateContent" in (m.supported_generation_methods or [])
@@ -326,7 +342,7 @@ LIST_MODELS_FUNCTIONS = {
 }
 
 
-def list_models(provider, api_key):
+def list_models(provider: str, api_key: str) -> list[ModelInfo]:
     func = LIST_MODELS_FUNCTIONS.get(provider)
     if not func:
         raise ValueError(f"Unknown provider: {provider}")

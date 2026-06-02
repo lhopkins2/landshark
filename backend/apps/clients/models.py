@@ -32,7 +32,7 @@ class Client(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         pass
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -53,7 +53,7 @@ class Project(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         pass
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -75,5 +75,5 @@ class ChainOfTitle(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         verbose_name_plural = "chains of title"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.property_address or f"Chain {self.id}"

@@ -15,7 +15,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
             "created_at",
         ]
 
-    def get_user_name(self, obj):
+    def get_user_name(self, obj: AuditLog) -> str:
         if not obj.user:
             return ""
         parts = [obj.user.first_name, obj.user.last_name]

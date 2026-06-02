@@ -3,7 +3,7 @@ import { Sun, Moon, LogOut, Save, Check, RefreshCw, Info } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useThemeStore } from "../stores/themeStore";
 import { useAuthStore, selectHasApiKeyAccess } from "../stores/authStore";
-import { analysisSettingsApi } from "../api/analysis";
+import { analysisSettingsApi, type AnalysisSettingsUpdate } from "../api/analysis";
 import { AI_PROVIDERS, AI_MODELS } from "../utils/constants";
 import type { AIProvider } from "../types/models";
 
@@ -131,8 +131,6 @@ export default function SettingsPage() {
   );
 }
 
-type AnalysisSettingsPayload = Parameters<typeof analysisSettingsApi.update>[0];
-
 function AIConfigSection() {
   const queryClient = useQueryClient();
   const { data: settings } = useQuery({
@@ -148,7 +146,7 @@ function AIConfigSection() {
   const [saved, setSaved] = useState(false);
 
   const saveMutation = useMutation({
-    mutationFn: (data: AnalysisSettingsPayload) => analysisSettingsApi.update(data),
+    mutationFn: (data: AnalysisSettingsUpdate) => analysisSettingsApi.update(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["analysis-settings"] });
       setAnthropicKey("");
@@ -180,7 +178,7 @@ function AIConfigSection() {
   const activeModel = model || settings?.default_model || (modelList ? modelList[0]?.id : Object.keys(hardcodedModels)[0]) || "";
 
   const handleSave = () => {
-    const data: AnalysisSettingsPayload = {};
+    const data: AnalysisSettingsUpdate = {};
     if (activeProvider) data.default_provider = activeProvider;
     data.default_model = model || activeModel;
     if (anthropicKey) data.anthropic_api_key = anthropicKey;
@@ -286,6 +284,16 @@ function AIConfigSection() {
           {providerHasKey && modelsError && (
             <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-error)", marginTop: 4, display: "block" }}>
               Failed to fetch models — check your API key
+            </span>
+          )}
+          {activeProvider === "gemini" && providerHasKey && (
+            <span style={{
+              fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 6, display: "block", lineHeight: 1.5,
+            }}>
+              <strong>Flash</strong> is recommended for most chains of title — typed deeds, recording stamps,
+              and standard cursive read at the same accuracy as Pro for a fraction of the cost.
+              Select <strong>Pro</strong> when working with heavy 1800s handwritten transcripts,
+              water-damaged scans, or otherwise difficult source documents.
             </span>
           )}
         </div>

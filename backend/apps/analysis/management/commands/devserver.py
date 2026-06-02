@@ -30,8 +30,7 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR("devserver is for development only (DEBUG must be True)."))
             sys.exit(1)
 
-        # Django's autoreloader spawns a child process with RUN_MAIN=true.
-        # Only start qcluster in the outer (reloader) process to avoid duplicates.
+        # Django autoreloader sets RUN_MAIN=true in the child; only the outer process spawns qcluster.
         is_reloader_child = os.environ.get("RUN_MAIN") == "true"
 
         if not is_reloader_child:
@@ -45,21 +44,48 @@ class Command(BaseCommand):
         call_command("runserver", *runserver_args, **runserver_kwargs)
 
     @staticmethod
-    def _is_qcluster_process_running():
-        """Check if a qcluster process is already running (OS process-level check)."""
+    def _running_qcluster_pids():
+        """Return PIDs of real `python ... manage.py qcluster` processes.
+
+        Tighter than `pgrep -f manage.py qcluster`, which matches lingering
+        shell commands (e.g. `pkill -f "manage.py qcluster"`) and causes
+        devserver to falsely skip the spawn.
+        """
+        own_pids = {os.getpid(), os.getppid()}
+        pids = []
         try:
             result = subprocess.run(
-                ["pgrep", "-f", "manage.py qcluster"],
+                ["ps", "-eo", "pid=,command="],
                 capture_output=True, text=True, timeout=5,
             )
-            return result.returncode == 0
+            for line in result.stdout.splitlines():
+                parts = line.strip().split(None, 1)
+                if len(parts) != 2:
+                    continue
+                pid_str, cmd = parts
+                try:
+                    pid = int(pid_str)
+                except ValueError:
+                    continue
+                if pid in own_pids:
+                    continue
+                # Require an actual python invocation, not a shell containing the words.
+                if "python" not in cmd.lower():
+                    continue
+                if "manage.py" not in cmd or "qcluster" not in cmd:
+                    continue
+                pids.append(pid)
         except Exception:
-            return False
+            pass
+        return pids
 
     def _start_worker(self):
-        """Spawn qcluster as a subprocess, with monitoring and cleanup."""
-        if self._is_qcluster_process_running():
-            self.stdout.write(self.style.SUCCESS("qcluster is already running — skipping spawn."))
+        """Spawn qcluster as a subprocess, with respawn-on-crash and cleanup on exit."""
+        existing = self._running_qcluster_pids()
+        if existing:
+            self.stdout.write(self.style.SUCCESS(
+                f"qcluster already running (PID {existing[0]}) — reusing it."
+            ))
             return
 
         self.stdout.write(self.style.SUCCESS("Starting qcluster worker..."))
@@ -74,7 +100,7 @@ class Command(BaseCommand):
                 cwd=str(settings.BASE_DIR),
             )
 
-        # Use a list so the reference can be updated from the monitor thread
+        # List wrapper lets the monitor thread swap in a fresh process after a crash.
         worker = [spawn_worker()]
 
         def cleanup():
@@ -88,7 +114,7 @@ class Command(BaseCommand):
 
         atexit.register(cleanup)
 
-        # Also handle SIGTERM so cleanup runs when the process is killed
+        # SIGTERM doesn't trigger atexit on its own; chain a handler so cleanup runs on kill.
         prev_handler = signal.getsignal(signal.SIGTERM)
 
         def sigterm_handler(signum, frame):
@@ -99,7 +125,6 @@ class Command(BaseCommand):
 
         signal.signal(signal.SIGTERM, sigterm_handler)
 
-        # Monitor thread: respawn worker if it crashes, with exponential backoff
         max_failures = 5
 
         def monitor():

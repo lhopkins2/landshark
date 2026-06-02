@@ -6,7 +6,7 @@ from encrypted_model_fields.fields import EncryptedCharField
 from apps.core.models import TimestampedModel
 
 
-def _template_upload_path(instance, filename):
+def _template_upload_path(instance: "FormTemplate", filename: str) -> str:
     """Store form templates under org-{uuid}/form_templates/YYYY/MM/."""
     if instance.uploaded_by:
         membership = getattr(instance.uploaded_by, "membership", None)
@@ -41,7 +41,7 @@ class FormTemplate(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         pass
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -71,7 +71,7 @@ class UserSettings(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         verbose_name_plural = "user settings"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Settings for {self.user.email}"
 
 
@@ -96,7 +96,7 @@ class OrganizationSettings(TimestampedModel):
     class Meta(TimestampedModel.Meta):
         verbose_name_plural = "organization settings"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Settings for {self.organization.name}"
 
 
@@ -134,6 +134,10 @@ class COTAnalysis(TimestampedModel):
         null=True,
         related_name="analyses",
     )
+    # Snapshot of the source filename at creation time. Survives deletion of the
+    # underlying Document (FK is SET_NULL) so the review history can still label
+    # the row and flag it as "source deleted".
+    document_name_snapshot = models.CharField(max_length=255, blank=True, default="")
     form_template = models.ForeignKey(
         FormTemplate,
         on_delete=models.SET_NULL,
@@ -170,6 +174,38 @@ class COTAnalysis(TimestampedModel):
         blank=True, default="", help_text="Full prompt sent to the AI (text portions only, for debugging)."
     )
     error_message = models.TextField(blank=True, default="")
+    # Two-stage pipeline output. `pipeline_version` is empty on historical rows
+    # that pre-date the structured pipeline; populated ("v1", ...) on every new run.
+    pipeline_version = models.CharField(max_length=20, blank=True, default="")
+    parsed_documents = models.JSONField(blank=True, null=True, default=None)
+    chain_events = models.JSONField(blank=True, null=True, default=None)
+    narrative = models.TextField(blank=True, default="")
+    notes = models.JSONField(blank=True, null=True, default=None)
+    failed_pages_count = models.PositiveIntegerField(default=0)
+    # Re-analyze creates a child analysis pointing back at the original; null on the first run.
+    parent_analysis = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="revisions",
+    )
+    revision_instructions = models.TextField(
+        blank=True,
+        default="",
+        help_text="Free-form user instructions captured on a re-analyze submission.",
+    )
+
+    class RevisionKind(models.TextChoices):
+        FULL_RUN = "full_run", "Full run"
+        REVISION = "revision", "Revision"
+
+    revision_kind = models.CharField(
+        max_length=20,
+        choices=RevisionKind.choices,
+        default=RevisionKind.FULL_RUN,
+        blank=True,
+    )
     generated_document = models.ForeignKey(
         "documents.Document",
         on_delete=models.SET_NULL,
@@ -188,5 +224,5 @@ class COTAnalysis(TimestampedModel):
         verbose_name = "COT analysis"
         verbose_name_plural = "COT analyses"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Analysis {self.id} - {self.status}"

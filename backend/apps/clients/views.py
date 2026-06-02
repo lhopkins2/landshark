@@ -22,12 +22,12 @@ class ClientViewSet(OrgScopedViewMixin, viewsets.ModelViewSet):
     search_fields = ["name", "primary_contact_name", "primary_contact_email", "city", "state"]
     ordering_fields = ["name", "created_at"]
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type:
         if self.action == "retrieve":
             return ClientDetailSerializer
         return ClientListSerializer
 
-    def perform_create(self, serializer):
+    def perform_create(self, serializer) -> None:
         org = self.get_org()
         serializer.save(organization=org)
 
@@ -39,15 +39,14 @@ class ProjectViewSet(OrgScopedViewMixin, viewsets.ModelViewSet):
     search_fields = ["name", "reference_number", "description"]
     ordering_fields = ["name", "created_at"]
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type:
         if self.action == "retrieve":
             return ProjectDetailSerializer
         return ProjectSerializer
 
-    def perform_create(self, serializer):
+    def perform_create(self, serializer) -> None:
         client = serializer.validated_data.get("client")
         if client and not self.get_queryset().filter(client=client).exists():
-            # Verify the client is in the user's org-scoped set
             org = self.get_org()
             if org and getattr(client, "organization_id", None) != org.id:
                 raise ValidationError({"client": "Client does not belong to your organization."})
@@ -61,12 +60,12 @@ class ChainOfTitleViewSet(OrgScopedViewMixin, viewsets.ModelViewSet):
     search_fields = ["property_address", "county", "parcel_number"]
     ordering_fields = ["property_address", "created_at"]
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type:
         if self.action == "retrieve":
             return ChainOfTitleDetailSerializer
         return ChainOfTitleSerializer
 
-    def perform_create(self, serializer):
+    def perform_create(self, serializer) -> None:
         project = serializer.validated_data.get("project")
         if project:
             org = self.get_org()
