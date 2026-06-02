@@ -64,9 +64,9 @@ def _build_stage1_content(
             ),
         },
     ]
-    for page_num, png_bytes in page_images:
+    for page_num, image_bytes in page_images:
         content.append({"type": "text", "text": f"--- Page {page_num} of {total_pages} ---"})
-        content.append({"type": "image", "data": png_bytes, "media_type": "image/png"})
+        content.append({"type": "image", "data": image_bytes, "media_type": "image/jpeg"})
 
     return content
 

@@ -9,6 +9,10 @@ from typing import Any
 # 150 pages is a practical cap; beyond that the provider context window is the real limit.
 IMAGE_DPI = 100
 MAX_PAGES_REDUCED = 150
+# JPEG quality 85 keeps text fully legible (artifacts only appear on photo-style
+# regions) while shrinking page bytes ~5-10× vs PNG. PNG losslessly preserved scanner
+# grain we didn't need, blowing past Anthropic's 32 MB request body cap on long deeds.
+JPEG_QUALITY = 85
 
 
 def extract_text_from_file(file_field: Any) -> str:
@@ -67,9 +71,9 @@ def render_pdf_pages(
     max_pages: int | None = None,
     page_indexes: Iterable[int] | None = None,
 ) -> tuple[list[tuple[int, bytes]], int]:
-    """Render PDF pages as PNGs for vision analysis.
+    """Render PDF pages as JPEGs for vision analysis.
 
-    Returns (list of (page_number, png_bytes), total_pages). page_number is 1-indexed.
+    Returns (list of (page_number, image_bytes), total_pages). page_number is 1-indexed.
     If page_indexes is given, only those pages are rendered (max_pages is ignored).
     """
     import pymupdf
@@ -100,8 +104,8 @@ def render_pdf_pages(
     for page_num in target:
         page = doc[page_num - 1]
         pixmap = page.get_pixmap(dpi=dpi)
-        png_bytes = pixmap.tobytes("png")
-        pages.append((page_num, png_bytes))
+        image_bytes = pixmap.tobytes("jpeg", jpg_quality=JPEG_QUALITY)
+        pages.append((page_num, image_bytes))
 
     doc.close()
     return pages, total_pages

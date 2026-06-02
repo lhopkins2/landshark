@@ -16,7 +16,7 @@ class ContentBlock(TypedDict, total=False):
     """Provider-agnostic content block.
 
     `type` is "text" or "image". Text blocks carry `text`; image blocks carry
-    raw `data` bytes and `media_type` ("image/png").
+    raw `data` bytes and `media_type` ("image/jpeg" for pipeline-rendered pages).
     """
 
     type: str
