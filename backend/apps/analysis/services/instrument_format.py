@@ -4,6 +4,7 @@ Single source of truth for instrument-type labels and party-name joining.
 Mirrors `src/utils/markdownTable.ts` on the frontend; keep both in sync.
 """
 
+import datetime
 from collections.abc import Iterable, Mapping
 from typing import TypedDict
 
@@ -95,6 +96,54 @@ def format_party_list(parties: Iterable[Mapping[str, object]] | None, empty: str
     """Join party names with semicolons, or return `empty` when none are present."""
     names = [str(p.get("name", "")) for p in (parties or []) if p.get("name")]
     return "; ".join(names) if names else empty
+
+
+def format_display_date(iso: str | None) -> str:
+    """Convert AI-returned ISO `YYYY-MM-DD` into display-friendly `MM/DD/YYYY`.
+
+    Internal storage and sort keys stay ISO (string-sortable). This is display only.
+    Falls back to the original string if the input doesn't parse, so legacy or
+    non-ISO inputs aren't silently dropped.
+    """
+    s = (iso or "").strip()
+    if not s:
+        return ""
+    try:
+        d = datetime.date.fromisoformat(s)
+    except ValueError:
+        return s
+    return d.strftime("%m/%d/%Y")
+
+
+SUBJECT_PREMISES_LABELS: dict[str, str] = {
+    "subject_premises": "Subject Premises",
+    "subject_premises_and_more": "Subject Premises and more",
+    "not_subject_premises": "Not Subject Premises",
+    # "unknown" / missing → empty so the comments cell isn't cluttered with a useless label.
+}
+
+
+def format_subject_premises_label(value: str | None) -> str:
+    """Display label for the `subject_premises_relationship` field.
+
+    Returns empty string for "unknown" / missing so callers can `". ".join(filter(None, ...))`
+    to drop it cleanly when there's nothing useful to say.
+    """
+    return SUBJECT_PREMISES_LABELS.get((value or "").strip(), "")
+
+
+def format_comments_cell(
+    subject_premises_relationship: str | None,
+    raw_comments: str | None,
+) -> str:
+    """Compose the Legal/Comments table cell from the relationship label + comments.
+
+    Order: "<Subject Premises label>. <comments>". Either part may be empty.
+    Newlines and pipes are stripped so the markdown table stays well-formed.
+    """
+    label = format_subject_premises_label(subject_premises_relationship)
+    body = (raw_comments or "").replace("\n", " ").replace("|", "/")
+    return ". ".join(part for part in (label, body) if part)
 
 
 def normalize_page_statuses(

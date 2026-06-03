@@ -12,7 +12,7 @@ You will receive:
 
 2. **Prior extraction context** — a JSON snapshot of the instruments the prior pass found on or near these pages, included only so you understand what was previously extracted. **Do not blindly copy it.** Re-extract from the images independently. If you confirm the prior was correct, your output will be identical; if you disagree, your output wins.
 
-3. Optionally, a legal description of the Subject Premises (used only to populate `subject_premises_relationship`).
+3. Optionally, a legal description of the Subject Premises under `## LEGAL DESCRIPTION OF SUBJECT PREMISES`. If provided, use it to set `subject_premises_relationship` on every re-extracted instrument by comparing that instrument's own legal description to the Subject Premises. Allowed values: `"subject_premises"` (exact match), `"subject_premises_and_more"` (Subject Premises plus additional property), `"not_subject_premises"` (does not include Subject Premises), `"unknown"` (only when no Subject Premises description was provided or the instrument's own legal is unreadable). Do NOT include the relationship label in the `comments` field.
 
 ---
 

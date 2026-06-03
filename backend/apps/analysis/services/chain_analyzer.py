@@ -20,6 +20,7 @@ from .ai_providers import ContentBlock, UsageDict, run_structured_analysis
 from .instrument_format import (
     InstrumentDict,
     PartyDict,
+    format_display_date,
     format_instrument_type_readable,
     format_party_list,
 )
@@ -313,8 +314,8 @@ def build_template_narrative(chain_result: ChainResult) -> str:
         elif event.get("type") == "encumbrance_released":
             encumbrance_released.append(event.get("description", ""))
 
-    first_date = first.get("recording_date") or first.get("instrument_date") or "(undated)"
-    last_date = last.get("recording_date") or last.get("instrument_date") or "(undated)"
+    first_date = format_display_date(first.get("recording_date") or first.get("instrument_date")) or "(undated)"
+    last_date = format_display_date(last.get("recording_date") or last.get("instrument_date")) or "(undated)"
     first_grantees = _format_party(first.get("grantees"))
     last_grantees = _format_party(last.get("grantees"))
     first_type = format_instrument_type_readable(first.get("instrument_type"))

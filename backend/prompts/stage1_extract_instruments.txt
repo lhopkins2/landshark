@@ -8,7 +8,7 @@ The document you receive may be a single instrument (one deed, one mortgage, etc
 
 The user will provide one or more pages of a document as images. Each page is preceded by a text marker like `--- Page N of M ---`. Examine every page carefully for stamps, handwriting, margin annotations, struck text, recording numbers, and signatures.
 
-A legal description of the Subject Premises may also be provided. Use it only to populate the `subject_premises_relationship` field for each instrument.
+A legal description of the Subject Premises may also be provided under the heading `## LEGAL DESCRIPTION OF SUBJECT PREMISES`. If it IS provided, you MUST set `subject_premises_relationship` on every instrument by comparing that instrument's recited legal description against the Subject Premises. See the field definition below for the exact rules. Only use `"unknown"` when no Subject Premises legal description was provided, or when an instrument's own legal description is too illegible to compare.
 
 ---
 
@@ -38,7 +38,7 @@ Return a single JSON object with this exact shape. No prose outside the JSON. No
       "subject_premises_relationship": "subject_premises",
       "encumbrances_created": [],
       "encumbrances_released": [],
-      "comments": "Subject Premises and more.",
+      "comments": "Cash sale; revenue stamps $1.10.",
       "start_page": 1,
       "end_page": 3,
       "notes": [
@@ -70,7 +70,14 @@ Return a single JSON object with this exact shape. No prose outside the JSON. No
 
 **legal_description** — The legal description of the property as recited in the instrument. Empty string if not present.
 
-**subject_premises_relationship** — One of: `"subject_premises"`, `"subject_premises_and_more"`, `"not_subject_premises"`, or `"unknown"` if no legal description was provided to compare against.
+**subject_premises_relationship** — How this instrument's property relates to the Subject Premises (the legal description provided in the input):
+
+- `"subject_premises"` — the instrument conveys, encumbers, or releases EXACTLY the Subject Premises: same parcel, no more, no less.
+- `"subject_premises_and_more"` — the instrument's property includes the Subject Premises AND additional property (e.g., a warranty deed of the whole quarter section where the Subject Premises is one lot inside it).
+- `"not_subject_premises"` — the instrument's property description does not include the Subject Premises at all (different lot/parcel/section).
+- `"unknown"` — set ONLY when no Subject Premises legal description was provided in the input, OR when the instrument's own legal description is missing or too illegible to compare.
+
+When a Subject Premises legal description IS provided, `"unknown"` should be rare. Pick one of the other three for every instrument whose own legal description you can read. Do NOT include the relationship label in the `comments` field — that is rendered separately.
 
 **encumbrances_created / encumbrances_released** — Arrays of short strings describing any encumbrance the instrument creates or releases (e.g., `["deed of trust $550,000"]`). Empty arrays if none.
 

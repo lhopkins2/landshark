@@ -24,6 +24,8 @@ from .document_analyzer import ParsedDocumentDict, analyze_document
 from .instrument_format import (
     InstrumentDict,
     NoteDict,
+    format_comments_cell,
+    format_display_date,
     format_instrument_type_upper,
     format_party_list,
 )
@@ -87,9 +89,9 @@ def build_markdown_output(
         begin = chronological[0].get("recording_date") or chronological[0].get("instrument_date") or ""
         end = chronological[-1].get("recording_date") or chronological[-1].get("instrument_date") or ""
         if begin:
-            lines.append(f"BEGIN SEARCH DATE: {begin}")
+            lines.append(f"BEGIN SEARCH DATE: {format_display_date(begin)}")
         if end:
-            lines.append(f"END SEARCH DATE: {end}")
+            lines.append(f"END SEARCH DATE: {format_display_date(end)}")
         # Earliest instrument's legal description is usually the original patent.
         if chronological[0].get("legal_description"):
             lines.append(f"DESCRIPTION: {chronological[0]['legal_description']}")
@@ -103,10 +105,13 @@ def build_markdown_output(
         row = [
             format_instrument_type_upper(inst.get("instrument_type")),
             reception,
-            recording_date,
+            format_display_date(recording_date),
             format_party_list(inst.get("grantors")),
             format_party_list(inst.get("grantees")),
-            (inst.get("comments") or "").replace("\n", " ").replace("|", "/"),
+            format_comments_cell(
+                inst.get("subject_premises_relationship"),
+                inst.get("comments"),
+            ),
             str(inst.get("start_page") or ""),
         ]
         lines.append("| " + " | ".join(row) + " |")
