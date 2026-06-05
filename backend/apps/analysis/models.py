@@ -17,7 +17,11 @@ def _template_upload_path(instance: "FormTemplate", filename: str) -> str:
 
 
 class FormTemplate(TimestampedModel):
-    """Reusable form templates for COT analysis output formatting."""
+    """Reusable form templates for COT analysis output formatting.
+
+    Templates are DOCX files using docxtpl/Jinja2 placeholders. They're
+    org-scoped — every org member sees the same library.
+    """
 
     name = models.CharField(max_length=255)
     file = models.FileField(upload_to=_template_upload_path)
@@ -30,6 +34,14 @@ class FormTemplate(TimestampedModel):
         default="",
         help_text="Custom instructions for the AI when using this template. "
         "Overrides the default form template instructions section of the prompt.",
+    )
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.CASCADE,
+        related_name="form_templates",
+        null=True,
+        blank=True,
+        help_text="Owning org; null for legacy/dev templates.",
     )
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

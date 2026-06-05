@@ -6,9 +6,9 @@
  * analysis's stored markdown — no PDF round-tripping.
  */
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { X, Loader, Download } from "lucide-react";
-import { analysesApi } from "../api/analysis";
+import { analysesApi, formTemplatesApi } from "../api/analysis";
 
 interface Props {
   analysisId: string;
@@ -22,11 +22,22 @@ interface Props {
 export default function ExportModal({ analysisId, defaultBaseName, sourceFormat, onClose }: Props) {
   // Default to the opposite format — the typical use of this modal is to convert.
   // The user can flip back to the same format with one click.
-  const [targetFormat, setTargetFormat] = useState<"pdf" | "docx">(
+  const [chosenFormat, setChosenFormat] = useState<"pdf" | "docx">(
     sourceFormat === "pdf" ? "docx" : "pdf",
   );
   const [filename, setFilename] = useState(defaultBaseName);
   const [stripDocPg, setStripDocPg] = useState(false);
+  const [templateId, setTemplateId] = useState<string>("");
+
+  const { data: templates = [] } = useQuery({
+    queryKey: ["form-templates"],
+    queryFn: () => formTemplatesApi.list().then((r) => r.data.results),
+  });
+
+  // Templated exports are DOCX only — force DOCX whenever a template is selected, derived
+  // (not stored) so we don't fight the user's last toggle if they unpick the template.
+  const targetFormat: "pdf" | "docx" = templateId ? "docx" : chosenFormat;
+  const setTargetFormat = setChosenFormat;
 
   const exportMutation = useMutation({
     mutationFn: () =>
@@ -34,6 +45,7 @@ export default function ExportModal({ analysisId, defaultBaseName, sourceFormat,
         format: targetFormat,
         strip_doc_pg: stripDocPg,
         filename: filename.trim() || defaultBaseName,
+        template_id: templateId || undefined,
       }),
     onSuccess: () => onClose(),
   });
@@ -105,6 +117,36 @@ export default function ExportModal({ analysisId, defaultBaseName, sourceFormat,
             </div>
           </label>
 
+          {templates.length > 0 && (
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-secondary)" }}>
+                Template
+              </span>
+              <select
+                value={templateId}
+                onChange={(e) => setTemplateId(e.target.value)}
+                disabled={exportMutation.isPending}
+                style={{
+                  padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+                  border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+                  fontSize: "var(--ls-text-sm)", outline: "none", color: "var(--ls-text)",
+                }}
+              >
+                <option value="">Default (plain layout)</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              {templateId && (
+                <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
+                  Templated exports are DOCX only.
+                </span>
+              )}
+            </label>
+          )}
+
           <div style={{ display: "grid", gap: 4 }}>
             <span style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-secondary)" }}>
               Format
@@ -117,19 +159,24 @@ export default function ExportModal({ analysisId, defaultBaseName, sourceFormat,
             <div style={{ display: "flex", gap: 8 }}>
               {(["pdf", "docx"] as const).map((fmt) => {
                 const active = targetFormat === fmt;
+                // Templated exports are DOCX only — disable the PDF button when a template is picked.
+                const disabledByTemplate = !!templateId && fmt === "pdf";
+                const isDisabled = exportMutation.isPending || disabledByTemplate;
                 return (
                   <button
                     key={fmt}
                     type="button"
-                    onClick={() => setTargetFormat(fmt)}
-                    disabled={exportMutation.isPending}
+                    onClick={() => !disabledByTemplate && setTargetFormat(fmt)}
+                    disabled={isDisabled}
+                    title={disabledByTemplate ? "Templated exports are DOCX only" : undefined}
                     style={{
                       flex: 1, padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
                       border: active ? "1px solid var(--ls-primary)" : "1px solid var(--ls-border)",
                       backgroundColor: active ? "rgba(139,105,20,0.08)" : "var(--ls-bg)",
                       color: active ? "var(--ls-primary)" : "var(--ls-text-secondary)",
                       fontSize: "var(--ls-text-sm)", fontWeight: active ? 600 : 500,
-                      cursor: exportMutation.isPending ? "wait" : "pointer",
+                      cursor: isDisabled ? "not-allowed" : "pointer",
+                      opacity: disabledByTemplate ? 0.4 : 1,
                     }}
                   >
                     {fmt.toUpperCase()}

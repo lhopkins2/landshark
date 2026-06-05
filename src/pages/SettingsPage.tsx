@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { Sun, Moon, LogOut, Save, Check, RefreshCw, Info } from "lucide-react";
+import { useRef, useState } from "react";
+import { Sun, Moon, LogOut, Save, Check, RefreshCw, Info, Upload, Trash2, FileText, Download } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useThemeStore } from "../stores/themeStore";
 import { useAuthStore, selectHasApiKeyAccess } from "../stores/authStore";
-import { analysisSettingsApi, type AnalysisSettingsUpdate } from "../api/analysis";
+import { analysisSettingsApi, formTemplatesApi, type AnalysisSettingsUpdate } from "../api/analysis";
 import { AI_PROVIDERS, AI_MODELS } from "../utils/constants";
-import type { AIProvider } from "../types/models";
+import type { AIProvider, FormTemplate } from "../types/models";
+import { formatFileSize } from "../utils/format";
 
 export default function SettingsPage() {
   const { theme, toggleTheme } = useThemeStore();
@@ -100,6 +101,8 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      <TemplatesSection />
 
       <div style={{
         padding: "var(--ls-space-lg)",
@@ -369,6 +372,191 @@ function InfoItem({ label, value }: { label: string; value: string }) {
     <div>
       <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500 }}>{value || "\u2014"}</div>
+    </div>
+  );
+}
+
+function TemplatesSection() {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadName, setUploadName] = useState("");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const { data: templates = [], isLoading } = useQuery({
+    queryKey: ["form-templates"],
+    queryFn: () => formTemplatesApi.list().then((r) => r.data.results),
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: ({ file, name }: { file: File; name: string }) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("name", name);
+      return formTemplatesApi.upload(fd).then((r) => r.data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["form-templates"] });
+      setUploadName("");
+      setUploadError(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    },
+    onError: (err: unknown) => {
+      const detail =
+        (err as { response?: { data?: { detail?: string; file?: string[] } } })?.response?.data;
+      setUploadError(detail?.detail ?? detail?.file?.[0] ?? "Upload failed.");
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => formTemplatesApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["form-templates"] }),
+  });
+
+  const handleUpload = () => {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) {
+      setUploadError("Pick a .docx file first.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".docx")) {
+      setUploadError("Only .docx files are supported.");
+      return;
+    }
+    const name = uploadName.trim() || file.name.replace(/\.docx$/i, "");
+    uploadMutation.mutate({ file, name });
+  };
+
+  return (
+    <div style={{
+      padding: "var(--ls-space-lg)",
+      backgroundColor: "var(--ls-surface)",
+      border: "1px solid var(--ls-border)",
+      borderRadius: "var(--ls-radius-lg)",
+      marginBottom: "var(--ls-space-lg)",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--ls-space-md)" }}>
+        <div>
+          <h3 style={{ fontWeight: 600, fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)", margin: 0 }}>
+            COT Templates
+          </h3>
+          <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 4, marginBottom: 0 }}>
+            DOCX templates with{" "}
+            <code style={{ fontFamily: "var(--ls-font-mono)", fontSize: "var(--ls-text-xs)" }}>{"{{ placeholders }}"}</code>{" "}
+            and a <code style={{ fontFamily: "var(--ls-font-mono)", fontSize: "var(--ls-text-xs)" }}>{"{%tr for inst in instruments %}"}</code>{" "}
+            loop. Download the starter, restyle in Word, re-upload.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => formTemplatesApi.downloadStarter()}
+          style={{
+            display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+            padding: "6px 12px", borderRadius: "var(--ls-radius-md)",
+            border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+            fontSize: "var(--ls-text-xs)", fontWeight: 600, cursor: "pointer",
+            color: "var(--ls-text-secondary)",
+          }}
+        >
+          <Download size={12} /> Download starter
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)" }}>Loading\u2026</div>
+      ) : templates.length === 0 ? (
+        <div style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text-muted)", marginBottom: "var(--ls-space-md)" }}>
+          No templates yet. Default plain-layout export is used until you upload one.
+        </div>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, margin: "0 0 var(--ls-space-md) 0", display: "grid", gap: 6 }}>
+          {templates.map((t: FormTemplate) => (
+            <li
+              key={t.id}
+              style={{
+                display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
+                padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+                border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+              }}
+            >
+              <FileText size={14} style={{ color: "var(--ls-text-muted)", flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {t.name}
+                </div>
+                <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
+                  {t.original_filename} &middot; {formatFileSize(t.file_size)}
+                  {t.uploaded_by_name && <> &middot; {t.uploaded_by_name}</>}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Delete template "${t.name}"? This cannot be undone.`)) {
+                    deleteMutation.mutate(t.id);
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+                title="Delete template"
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 28, height: 28, borderRadius: "var(--ls-radius-md)",
+                  border: "1px solid var(--ls-border)", backgroundColor: "transparent",
+                  color: "var(--ls-error)", cursor: "pointer", flexShrink: 0,
+                }}
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div style={{
+        display: "grid", gap: 8, padding: "var(--ls-space-md)",
+        borderRadius: "var(--ls-radius-md)", border: "1px dashed var(--ls-border)",
+        backgroundColor: "var(--ls-bg)",
+      }}>
+        <div style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-secondary)" }}>
+          Upload a new template
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            style={{ fontSize: "var(--ls-text-sm)", color: "var(--ls-text)" }}
+          />
+          <input
+            type="text"
+            placeholder="Template name (optional)"
+            value={uploadName}
+            onChange={(e) => setUploadName(e.target.value)}
+            style={{
+              flex: 1, minWidth: 180, padding: "6px 10px", borderRadius: "var(--ls-radius-md)",
+              border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-surface)",
+              fontSize: "var(--ls-text-sm)", outline: "none", color: "var(--ls-text)",
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleUpload}
+            disabled={uploadMutation.isPending}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "6px 12px", borderRadius: "var(--ls-radius-md)",
+              border: "none", backgroundColor: "var(--ls-primary)",
+              color: "var(--ls-text-on-primary)", fontSize: "var(--ls-text-sm)", fontWeight: 600,
+              cursor: uploadMutation.isPending ? "wait" : "pointer",
+              opacity: uploadMutation.isPending ? 0.7 : 1,
+            }}
+          >
+            <Upload size={14} /> {uploadMutation.isPending ? "Uploading\u2026" : "Upload"}
+          </button>
+        </div>
+        {uploadError && (
+          <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-error)" }}>{uploadError}</div>
+        )}
+      </div>
     </div>
   );
 }

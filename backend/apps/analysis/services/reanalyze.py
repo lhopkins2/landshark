@@ -26,7 +26,7 @@ from .instrument_format import (
     build_flat_notes,
     normalize_page_statuses,
 )
-from .pipeline import PIPELINE_VERSION, PipelineResult, build_markdown_output
+from .pipeline import PIPELINE_VERSION, PipelineResult, _build_header_fields, build_markdown_output
 
 if TYPE_CHECKING:
     from apps.analysis.models import COTAnalysis
@@ -187,6 +187,7 @@ def run_reanalyze(
     model: str = "",
     legal_description: str = "",
     analysis_order: str = "chronological",
+    title_agent_name: str = "",
 ) -> PipelineResult:
     """Build a new PipelineResult from `parent_analysis` plus optional edits/rescans/guidance."""
     out: PipelineResult = {
@@ -284,5 +285,6 @@ def run_reanalyze(
         narrative=out["narrative"],
         notes=merged_notes,
         analysis_order=analysis_order,
+        header_fields=_build_header_fields(parent_analysis.document, legal_description, title_agent_name),
     )
     return out

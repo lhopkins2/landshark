@@ -3,6 +3,7 @@ import type {
   UserAnalysisSettings,
   COTAnalysis,
   COTAnalysisDebug,
+  FormTemplate,
   PaginatedResponse,
   ReanalyzePayload,
 } from "../types/models";
@@ -52,10 +53,13 @@ export const analysesApi = {
     apiClient.post<COTAnalysis>(`/analysis/cancel/${id}/`),
   reanalyze: (id: string, payload: ReanalyzePayload) =>
     apiClient.post<COTAnalysis>(`/analysis/${id}/reanalyze/`, payload),
-  /** Render the analysis output to PDF/DOCX (with optional Doc Pg strip) and trigger a browser download. */
+  /** Render the analysis output to PDF/DOCX (with optional Doc Pg strip) and trigger a browser download.
+   *
+   * Pass `template_id` to render through a saved FormTemplate (DOCX only).
+   */
   export: async (
     id: string,
-    opts: { format: "pdf" | "docx"; strip_doc_pg?: boolean; filename?: string },
+    opts: { format: "pdf" | "docx"; strip_doc_pg?: boolean; filename?: string; template_id?: string },
   ) => {
     const response = await apiClient.post(`/analysis/${id}/export/`, opts, {
       responseType: "blob",
@@ -79,6 +83,30 @@ export const analysesApi = {
   },
   debug: (id: string) =>
     apiClient.get<COTAnalysisDebug>(`/analysis/debug/${id}/`),
+};
+
+/** CRUD + starter download for shop-defined COT templates. */
+export const formTemplatesApi = {
+  list: () => apiClient.get<PaginatedResponse<FormTemplate>>("/form-templates/"),
+  upload: (data: FormData) =>
+    apiClient.post<FormTemplate>("/form-templates/", data, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  update: (id: string, data: Partial<Pick<FormTemplate, "name" | "description" | "custom_prompt">>) =>
+    apiClient.patch<FormTemplate>(`/form-templates/${id}/`, data),
+  delete: (id: string) => apiClient.delete(`/form-templates/${id}/`),
+  /** Download the bundled starter template — shops customize this in Word, then re-upload. */
+  downloadStarter: async () => {
+    const response = await apiClient.get("/form-templates/starter/", { responseType: "blob" });
+    const url = window.URL.createObjectURL(response.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cot_starter_template.docx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };
 
 interface DashboardStats {

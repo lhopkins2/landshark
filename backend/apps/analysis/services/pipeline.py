@@ -67,11 +67,16 @@ def build_markdown_output(
     narrative: str,
     notes: Iterable[NoteDict] | None,
     analysis_order: str,
+    header_fields: dict[str, str] | None = None,
 ) -> str:
     """Render the markdown document fed to the PDF/DOCX generator.
 
-    Sections: header fields (BEGIN/END SEARCH DATE, DESCRIPTION), instrument
-    table, narrative summary, notes.
+    Sections: header (BEGIN/END SEARCH DATE + caller-supplied fields like
+    PROPERTY ADDRESS, TAX ID, RECORD HOLDER, TITLE AGENT, DESCRIPTION),
+    instrument table, narrative summary, notes.
+
+    `header_fields` is rendered in insertion order; empty values are skipped so
+    the header stays tight.
     """
     instruments: list[InstrumentDict] = []
     for pd in parsed_documents or []:
@@ -92,9 +97,10 @@ def build_markdown_output(
             lines.append(f"BEGIN SEARCH DATE: {format_display_date(begin)}")
         if end:
             lines.append(f"END SEARCH DATE: {format_display_date(end)}")
-        # Earliest instrument's legal description is usually the original patent.
-        if chronological[0].get("legal_description"):
-            lines.append(f"DESCRIPTION: {chronological[0]['legal_description']}")
+    for label, value in (header_fields or {}).items():
+        if value:
+            lines.append(f"{label}: {value}")
+    if sorted_inst or header_fields:
         lines.append("")
 
     lines.append("| Document Caption | Reception # | Date Recorded | Grantor | Grantee | Legal/Comments | Doc Pg |")
@@ -133,6 +139,36 @@ def build_markdown_output(
     return "\n".join(lines)
 
 
+def _build_header_fields(
+    document: "Document",
+    legal_description: str,
+    title_agent_name: str,
+) -> dict[str, str]:
+    """Compose the header block for the deliverable from document/chain/user info.
+
+    Order is insertion order; empty values are dropped by the renderer.
+    `legal_description` (per-run user input) wins; falls back to the chain's stored value.
+    """
+    chain = getattr(document, "chain_of_title", None)
+    chain_legal = (getattr(chain, "legal_description", "") or "") if chain else ""
+    address = (getattr(chain, "property_address", "") or "") if chain else ""
+    county = (getattr(chain, "county", "") or "") if chain else ""
+    state = (getattr(chain, "state", "") or "") if chain else ""
+    parcel = (getattr(chain, "parcel_number", "") or "") if chain else ""
+    county_state = ", ".join(p for p in (county, state) if p)
+    return {
+        "PROPERTY ADDRESS": address,
+        "COUNTY": county_state,
+        "TAX ID / PARCEL #": parcel,
+        "TRACT #": document.tract_number or "",
+        "RECORD HOLDER": document.last_record_holder or "",
+        "TITLE AGENT": title_agent_name or "",
+        # Per-run user input wins over the chain's stored description so a one-off
+        # override doesn't get silently dropped.
+        "DESCRIPTION": (legal_description or "").strip() or chain_legal,
+    }
+
+
 def run_pipeline(
     document: "Document",
     provider: str,
@@ -140,6 +176,7 @@ def run_pipeline(
     model: str = "",
     legal_description: str = "",
     analysis_order: str = "chronological",
+    title_agent_name: str = "",
 ) -> PipelineResult:
     """Run Stage 1 + Stage 2 against a single Document, returning a PipelineResult.
 
@@ -221,6 +258,7 @@ def run_pipeline(
         narrative=out["narrative"],
         notes=out["notes"],
         analysis_order=analysis_order,
+        header_fields=_build_header_fields(document, legal_description, title_agent_name),
     )
 
     return out

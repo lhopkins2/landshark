@@ -31,6 +31,15 @@ def _check_cancelled(analysis_id: str) -> None:
         raise _AnalysisCancelledError()
 
 
+def _resolve_title_agent_name(user: "User") -> str:
+    """Best-effort display name for the TITLE AGENT header line.
+
+    Prefers `User.get_full_name()`, falls back to email when first/last are blank.
+    """
+    full = (user.get_full_name() or "").strip()
+    return full or (user.email or "")
+
+
 def _output_format_meta(output_format: str) -> tuple[str, str]:
     """Map output_format to (extension, mime_type)."""
     if output_format == "docx":
@@ -232,6 +241,7 @@ def _run_new_pipeline(
         model=model,
         legal_description=legal_description,
         analysis_order=analysis_order,
+        title_agent_name=_resolve_title_agent_name(user),
     )
 
     # result_text holds a markdown document (table + narrative + notes) for the PDF/DOCX generator.
@@ -337,6 +347,7 @@ def reanalyze_task(
             model=model,
             legal_description=legal_description,
             analysis_order=analysis_order,
+            title_agent_name=_resolve_title_agent_name(user),
         )
 
         full_markdown = _save_pipeline_result_to_analysis(analysis, result)

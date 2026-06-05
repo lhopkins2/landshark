@@ -3,10 +3,10 @@ import logging
 import os
 from typing import Any
 
-from django.core.files.base import ContentFile
 from django.utils import timezone
 from django_q.tasks import async_task
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -34,6 +34,26 @@ from .services.document_generator import generate_document, strip_page_column
 from .utils import STALE_ANALYSIS_TIMEOUT, is_qcluster_running, recover_stale_analyses
 
 logger = logging.getLogger(__name__)
+
+
+def _user_visible_form_template(user: Any, template_id: str) -> "FormTemplate":
+    """Look up a FormTemplate scoped to the user's org.
+
+    Developers see everything. Org users see templates in their org (or legacy
+    templates uploaded by an org-mate before the org FK existed). Raises
+    `FormTemplate.DoesNotExist` if the lookup misses, so the caller can 404.
+    """
+    from django.db.models import Q
+    qs = FormTemplate.objects.all()
+    if not getattr(user, "is_developer", False):
+        membership = getattr(user, "membership", None)
+        if not membership:
+            raise FormTemplate.DoesNotExist
+        qs = qs.filter(
+            Q(organization=membership.organization)
+            | Q(organization__isnull=True, uploaded_by__membership__organization=membership.organization)
+        )
+    return qs.get(id=template_id)
 
 
 def _user_is_admin(user: Any) -> bool:
@@ -94,7 +114,7 @@ def resolve_api_config(user: Any) -> tuple[str, str, dict[str, str]]:
 
 
 class FormTemplateViewSet(viewsets.ModelViewSet):
-    queryset = FormTemplate.objects.select_related("uploaded_by").all()
+    queryset = FormTemplate.objects.select_related("uploaded_by", "organization").all()
     permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     search_fields = ["name", "description"]
@@ -108,7 +128,13 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
         membership = getattr(user, "membership", None)
         if not membership:
             return qs.none()
-        return qs.filter(uploaded_by__membership__organization=membership.organization)
+        # Prefer the direct organization FK; fall back to uploader's membership for legacy rows
+        # that haven't been backfilled.
+        from django.db.models import Q
+        return qs.filter(
+            Q(organization=membership.organization)
+            | Q(organization__isnull=True, uploaded_by__membership__organization=membership.organization)
+        )
 
     def get_serializer_class(self) -> type:
         if self.action == "create":
@@ -119,22 +145,32 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         template = serializer.save()
-
-        # Also mirror the template into Documents so it shows up under the documents/ media path.
-        doc = Document(
-            original_filename=template.original_filename,
-            file_size=template.file_size,
-            mime_type=template.mime_type,
-            description=f"Form template: {template.name}",
-            uploaded_by=request.user,
-        )
-        template.file.seek(0)
-        doc.file.save(template.original_filename, ContentFile(template.file.read()), save=True)
+        # Stamp the org FK from the uploader's membership so future queries don't need the join.
+        membership = getattr(request.user, "membership", None)
+        if membership and not template.organization_id:
+            template.organization = membership.organization
+            template.save(update_fields=["organization", "updated_at"])
 
         return Response(
             FormTemplateSerializer(template, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=False, methods=["get"], url_path="starter", permission_classes=[IsAuthenticated])
+    def starter(self, request: Any) -> Any:
+        """Stream the bundled starter COT template — shops download, restyle in Word, re-upload."""
+        from django.http import FileResponse
+
+        from .services.template_renderer import STARTER_TEMPLATE_PATH
+
+        if not os.path.exists(STARTER_TEMPLATE_PATH):
+            return Response({"detail": "Starter template not found on server."}, status=status.HTTP_404_NOT_FOUND)
+        response = FileResponse(
+            open(STARTER_TEMPLATE_PATH, "rb"),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        response["Content-Disposition"] = 'attachment; filename="cot_starter_template.docx"'
+        return response
 
 
 class UserSettingsView(APIView):
@@ -433,6 +469,10 @@ class ExportAnalysisView(APIView):
     Doc Pg column, and streams the result. Nothing is persisted to the DB —
     this is a pure post-processing download. Subsumes the previous
     convert-to-docx and strip-doc-pg endpoints.
+
+    When `template_id` is supplied AND the format is `docx`, renders through a
+    FormTemplate (docxtpl) instead of the default markdown-to-docx generator.
+    Templated PDF is not supported in v1.
     """
 
     _MIME = {
@@ -443,12 +483,14 @@ class ExportAnalysisView(APIView):
     def post(self, request: Any, pk: str) -> Response:
         from django.http import HttpResponse
 
+        from .services.template_renderer import render_analysis_with_template
+
         try:
             analysis = COTAnalysis.objects.get(id=pk, created_by=request.user)
         except COTAnalysis.DoesNotExist:
             return Response({"detail": "Analysis not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if not (analysis.result_text or "").strip():
+        if not (analysis.result_text or "").strip() and not analysis.parsed_documents:
             return Response(
                 {"detail": "This analysis has no rendered output to export."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -460,6 +502,20 @@ class ExportAnalysisView(APIView):
                 {"detail": "format must be 'pdf' or 'docx'."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Template flow: only supported for DOCX output in v1 (no docx→pdf path on the box).
+        template_id = (request.data.get("template_id") or "").strip()
+        template: FormTemplate | None = None
+        if template_id:
+            if target_format != "docx":
+                return Response(
+                    {"detail": "Template export is only available for DOCX format."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                template = _user_visible_form_template(request.user, template_id)
+            except FormTemplate.DoesNotExist:
+                return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
 
         strip_doc_pg = bool(request.data.get("strip_doc_pg"))
         markdown = strip_page_column(analysis.result_text) if strip_doc_pg else analysis.result_text
@@ -480,7 +536,28 @@ class ExportAnalysisView(APIView):
             base = default_base
         filename = f"{base}.{target_format}"
 
-        buf = generate_document(markdown, target_format, title=base)
+        if template is not None:
+            # Templated render: docxtpl reads structured data straight off the analysis row.
+            # The strip_doc_pg toggle has no effect here — the template's columns are whatever
+            # the shop authored. We pass the user's analyze-time legal description + title agent
+            # so the header section matches what the markdown renderer would have produced.
+            from .tasks import _resolve_title_agent_name
+            agent_name = _resolve_title_agent_name(request.user)
+            try:
+                buf = render_analysis_with_template(
+                    analysis=analysis,
+                    template=template,
+                    legal_description="",  # per-run legal_description isn't stored on the analysis row today
+                    title_agent_name=agent_name,
+                )
+            except Exception as exc:
+                logger.exception("Template render failed for analysis %s template %s", analysis.id, template.id)
+                return Response(
+                    {"detail": f"Template render failed: {exc}"},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                )
+        else:
+            buf = generate_document(markdown, target_format, title=base)
         data = buf.getvalue()
 
         log_action(
