@@ -440,10 +440,10 @@ function TemplatesSection() {
             COT Templates
           </h3>
           <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 4, marginBottom: 0 }}>
-            DOCX templates with{" "}
-            <code style={{ fontFamily: "var(--ls-font-mono)", fontSize: "var(--ls-text-xs)" }}>{"{{ placeholders }}"}</code>{" "}
-            and a <code style={{ fontFamily: "var(--ls-font-mono)", fontSize: "var(--ls-text-xs)" }}>{"{%tr for inst in instruments %}"}</code>{" "}
-            loop. Download the starter, restyle in Word, re-upload.
+            Upload your existing COT form (.docx). We detect the field labels
+            (TAX ID, GRANTOR, etc.) and the instrument table, then fill them in on
+            export — your exact layout, fonts, and footer are preserved. The table
+            must have columns including <strong>Grantor</strong> and <strong>Grantee</strong>.
           </p>
         </div>
         <button

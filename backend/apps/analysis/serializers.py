@@ -47,9 +47,32 @@ class FormTemplateUploadSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data: dict[str, Any]) -> FormTemplate:
+        from django.core.files.base import ContentFile
+
+        from .services.template_intake import (
+            TemplatePreparationError,
+            prepare_uploaded_template,
+        )
+
         uploaded_file = validated_data["file"]
-        validated_data["original_filename"] = uploaded_file.name
-        validated_data["file_size"] = uploaded_file.size
+        original_name = uploaded_file.name
+
+        # Inject docxtpl placeholders so a plain shop form (labels + empty table,
+        # no template syntax) becomes renderable. Already-templated docs pass through.
+        uploaded_file.seek(0)
+        raw_bytes = uploaded_file.read()
+        try:
+            prepared_bytes = prepare_uploaded_template(raw_bytes)
+        except TemplatePreparationError as exc:
+            raise serializers.ValidationError({"file": str(exc)}) from exc
+        except Exception as exc:  # malformed docx, etc.
+            raise serializers.ValidationError(
+                {"file": f"Could not process this DOCX: {exc}"}
+            ) from exc
+
+        validated_data["file"] = ContentFile(prepared_bytes, name=original_name)
+        validated_data["original_filename"] = original_name
+        validated_data["file_size"] = len(prepared_bytes)
         validated_data["mime_type"] = uploaded_file.content_type or ""
         validated_data["uploaded_by"] = self.context["request"].user
         return super().create(validated_data)

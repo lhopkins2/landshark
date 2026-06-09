@@ -134,8 +134,15 @@ def render_with_template(
     `template_path_or_fileobj` is a path string OR a file-like with a `.read()`
     method (e.g., a Django FieldFile or BytesIO). docxtpl needs a file path or
     a BytesIO, so we normalize.
+
+    Placeholders are injected at render time (idempotent — already-templated docs
+    pass straight through). This is the safety net that makes plain templates
+    work even if they were uploaded before upload-time injection existed, so a
+    shop never has to re-upload.
     """
     from docxtpl import DocxTemplate
+
+    from .template_intake import prepare_uploaded_template
 
     if hasattr(template_path_or_fileobj, "read"):
         template_path_or_fileobj.open("rb") if hasattr(template_path_or_fileobj, "open") else None
@@ -144,11 +151,14 @@ def render_with_template(
         finally:
             if hasattr(template_path_or_fileobj, "close"):
                 template_path_or_fileobj.close()
-        src: Any = io.BytesIO(data)
     else:
-        src = template_path_or_fileobj
+        with open(template_path_or_fileobj, "rb") as fh:
+            data = fh.read()
 
-    doc = DocxTemplate(src)
+    # Inject placeholders if missing; passthrough if the doc is already templated.
+    data = prepare_uploaded_template(data)
+
+    doc = DocxTemplate(io.BytesIO(data))
     doc.render(context)
     out = io.BytesIO()
     doc.save(out)
