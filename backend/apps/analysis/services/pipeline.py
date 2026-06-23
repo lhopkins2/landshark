@@ -58,6 +58,7 @@ class PipelineResult(TypedDict):
     notes: list[NoteDict]
     failed_pages_count: int
     result_text: str
+    header_extracted: dict[str, str]
     usage: UsageDict
     error: str
 
@@ -68,12 +69,13 @@ def build_markdown_output(
     notes: Iterable[NoteDict] | None,
     analysis_order: str,
     header_fields: dict[str, str] | None = None,
+    subject_premises: str = "",
 ) -> str:
     """Render the markdown document fed to the PDF/DOCX generator.
 
     Sections: header (BEGIN/END SEARCH DATE + caller-supplied fields like
-    PROPERTY ADDRESS, TAX ID, RECORD HOLDER, TITLE AGENT, DESCRIPTION),
-    instrument table, narrative summary, notes.
+    PROPERTY ADDRESS, TAX ID, RECORD HOLDER, TITLE AGENT, DESCRIPTION), the
+    Subject Premises (Recommended) block, instrument table, narrative, notes.
 
     `header_fields` is rendered in insertion order; empty values are skipped so
     the header stays tight.
@@ -101,6 +103,13 @@ def build_markdown_output(
         if value:
             lines.append(f"{label}: {value}")
     if sorted_inst or header_fields:
+        lines.append("")
+
+    # Subject Premises gets its own labelled section (the operator's search basis).
+    if (subject_premises or "").strip():
+        lines.append("## Subject Premises (Recommended)")
+        lines.append("")
+        lines.append(subject_premises.strip())
         lines.append("")
 
     lines.append("| Document Caption | Reception # | Date Recorded | Grantor | Grantee | Legal/Comments | Doc Pg |")
@@ -141,31 +150,28 @@ def build_markdown_output(
 
 def _build_header_fields(
     document: "Document",
-    legal_description: str,
-    title_agent_name: str,
+    header_fields: dict[str, str] | None,
+    title_agent_default: str = "",
+    ai_extracted: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Compose the header block for the deliverable from document/chain/user info.
+    """Compose the labelled header block for the deliverable.
 
-    Order is insertion order; empty values are dropped by the renderer.
-    `legal_description` (per-run user input) wins; falls back to the chain's stored value.
+    Sources values via `resolve_header_values` (operator entry → AI-extracted →
+    saved chain/document records). Order is insertion order; empty values are
+    dropped by the renderer.
     """
-    chain = getattr(document, "chain_of_title", None)
-    chain_legal = (getattr(chain, "legal_description", "") or "") if chain else ""
-    address = (getattr(chain, "property_address", "") or "") if chain else ""
-    county = (getattr(chain, "county", "") or "") if chain else ""
-    state = (getattr(chain, "state", "") or "") if chain else ""
-    parcel = (getattr(chain, "parcel_number", "") or "") if chain else ""
-    county_state = ", ".join(p for p in (county, state) if p)
+    from .header import resolve_header_values
+
+    h = resolve_header_values(document, header_fields, title_agent_default, ai_extracted)
     return {
-        "PROPERTY ADDRESS": address,
-        "COUNTY": county_state,
-        "TAX ID / PARCEL #": parcel,
-        "TRACT #": document.tract_number or "",
-        "RECORD HOLDER": document.last_record_holder or "",
-        "TITLE AGENT": title_agent_name or "",
-        # Per-run user input wins over the chain's stored description so a one-off
-        # override doesn't get silently dropped.
-        "DESCRIPTION": (legal_description or "").strip() or chain_legal,
+        "PROPERTY ADDRESS": h.get("address", ""),
+        "COUNTY": h.get("county_state", ""),
+        "TAX ID / PARCEL #": h.get("tax_id", ""),
+        "TRACT #": h.get("tract_number", ""),
+        "RECORD HOLDER": h.get("record_owner", ""),
+        "ACRES": h.get("acres", ""),
+        "TITLE AGENT": h.get("title_agent", ""),
+        "DESCRIPTION": h.get("legal_description", ""),
     }
 
 
@@ -177,6 +183,7 @@ def run_pipeline(
     legal_description: str = "",
     analysis_order: str = "chronological",
     title_agent_name: str = "",
+    header_fields: dict[str, str] | None = None,
 ) -> PipelineResult:
     """Run Stage 1 + Stage 2 against a single Document, returning a PipelineResult.
 
@@ -191,16 +198,26 @@ def run_pipeline(
         "notes": [],
         "failed_pages_count": 0,
         "result_text": "",
+        "header_extracted": {},
         "usage": {"input_tokens": 0, "output_tokens": 0},
         "error": "",
     }
+
+    # Stage 1's subject-premises comparison uses the effective legal description:
+    # the operator's header override if present, else the explicit param / chain value.
+    from .header import resolve_header_values
+
+    effective_legal = (
+        resolve_header_values(document, header_fields).get("legal_description", "")
+        or legal_description
+    )
 
     parsed = analyze_document(
         document=document,
         provider=provider,
         api_key=api_key,
         model=model,
-        legal_description=legal_description,
+        legal_description=effective_legal,
     )
     out["parsed_documents"].append(parsed)
     out["usage"]["input_tokens"] += parsed["usage"]["input_tokens"]
@@ -226,6 +243,18 @@ def run_pipeline(
 
     chain = build_chain(all_instruments)
     out["chain_events"] = chain["events"]
+
+    # Extract report-header metadata (Tax ID, Record Owner, Address, Acres) from the
+    # instruments — one cheap text-only call. Fills header fields the operator left
+    # blank. Non-fatal: returns {} on any failure.
+    from .header_extract import extract_header_metadata
+
+    header_meta, header_usage = extract_header_metadata(
+        all_instruments, effective_legal, provider, api_key, model
+    )
+    out["header_extracted"] = header_meta
+    out["usage"]["input_tokens"] += header_usage.get("input_tokens", 0)
+    out["usage"]["output_tokens"] += header_usage.get("output_tokens", 0)
 
     # Stage 2b: AI resolves open questions and writes the narrative.
     # Clean chains skip the AI call — the deterministic narrative is accurate
@@ -258,7 +287,8 @@ def run_pipeline(
         narrative=out["narrative"],
         notes=out["notes"],
         analysis_order=analysis_order,
-        header_fields=_build_header_fields(document, legal_description, title_agent_name),
+        header_fields=_build_header_fields(document, header_fields, title_agent_name, header_meta),
+        subject_premises=effective_legal,
     )
 
     return out

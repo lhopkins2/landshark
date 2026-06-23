@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Building2 } from "lucide-react";
 import { isAxiosError } from "axios";
-import { enterpriseApi } from "../../api/enterprise";
+import { enterpriseApi, type OrgTier } from "../../api/enterprise";
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -18,8 +18,16 @@ const inputStyle: React.CSSProperties = {
 
 export default function CreateOrgModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    name: string;
+    tier: OrgTier;
+    admin_email: string;
+    admin_first_name: string;
+    admin_last_name: string;
+    admin_password: string;
+  }>({
     name: "",
+    tier: "standard",
     admin_email: "",
     admin_first_name: "",
     admin_last_name: "",
@@ -47,7 +55,7 @@ export default function CreateOrgModal({ onClose }: { onClose: () => void }) {
     },
   });
 
-  const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [field]: e.target.value }));
 
   return (
@@ -80,6 +88,12 @@ export default function CreateOrgModal({ onClose }: { onClose: () => void }) {
         <form onSubmit={(e) => { e.preventDefault(); createMut.mutate(); }}>
           <FieldLabel label="Organization Name" required />
           <input value={form.name} onChange={set("name")} required style={inputStyle} placeholder="Acme Title Company" />
+
+          <FieldLabel label="Tier" />
+          <select value={form.tier} onChange={set("tier")} style={inputStyle}>
+            <option value="standard">Standard — shared worker pool</option>
+            <option value="enterprise">Enterprise — isolated worker pool</option>
+          </select>
 
           <div style={{ borderTop: "1px solid var(--ls-border)", margin: "var(--ls-space-md) 0", paddingTop: "var(--ls-space-md)" }}>
             <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "var(--ls-space-sm)" }}>

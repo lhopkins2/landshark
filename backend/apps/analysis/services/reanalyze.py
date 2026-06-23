@@ -198,6 +198,7 @@ def run_reanalyze(
         "notes": [],
         "failed_pages_count": 0,
         "result_text": "",
+        "header_extracted": dict(parent_analysis.header_extracted or {}),
         "usage": {"input_tokens": 0, "output_tokens": 0},
         "error": "",
     }
@@ -212,6 +213,15 @@ def run_reanalyze(
     pd = parsed[0]
     pd_instruments = list(pd.get("instruments") or [])
 
+    # Effective legal description for rescans + header: the parent's operator
+    # header override wins, falling back to the explicit arg / saved records.
+    from .header import resolve_header_values
+
+    effective_legal = (
+        resolve_header_values(parent_analysis.document, parent_analysis.header_fields).get("legal_description", "")
+        or legal_description
+    )
+
     rescanned_pages = set(int(p) for p in (pages_to_rescan or []))
     if rescanned_pages:
         rescan = _reextract_pages(
@@ -221,7 +231,7 @@ def run_reanalyze(
             provider=provider,
             api_key=api_key,
             model=model,
-            legal_description=legal_description,
+            legal_description=effective_legal,
         )
         out["usage"] = _add_usage(out["usage"], rescan["usage"])
         if rescan.get("error"):
@@ -285,6 +295,12 @@ def run_reanalyze(
         narrative=out["narrative"],
         notes=merged_notes,
         analysis_order=analysis_order,
-        header_fields=_build_header_fields(parent_analysis.document, legal_description, title_agent_name),
+        header_fields=_build_header_fields(
+            parent_analysis.document,
+            parent_analysis.header_fields,
+            title_agent_name,
+            out["header_extracted"],
+        ),
+        subject_premises=effective_legal,
     )
     return out

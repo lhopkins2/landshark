@@ -33,8 +33,25 @@ export interface Document {
    * on outputs whose source has been deleted.
    */
   source_document_id: string | null;
+  /** Prefill values for the Analyze form's report-header fields (from chain/document + current user). */
+  suggested_header?: COTHeaderFields;
   created_at: string;
   updated_at: string;
+}
+
+/** Operator-editable COT report-header fields. */
+export interface COTHeaderFields {
+  tax_id: string;
+  tract_number: string;
+  record_owner: string;
+  address: string;
+  acres: string;
+  title_agent: string;
+  legal_description: string;
+  /** Read-only context from the chain (not edited on the form). */
+  county?: string;
+  state?: string;
+  county_state?: string;
 }
 
 export interface PaginatedResponse<T> {

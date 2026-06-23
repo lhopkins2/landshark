@@ -114,12 +114,8 @@ AXES_RESET_ON_SUCCESS = True
 # REST Framework
 # ---------------------------------------------------------------------------
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
+    "DEFAULT_AUTHENTICATION_CLASSES": ("rest_framework_simplejwt.authentication.JWTAuthentication",),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.StandardPagination",
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -205,15 +201,32 @@ FIELD_ENCRYPTION_KEY = config("FIELD_ENCRYPTION_KEY", default="Ptro9TId8Cjhb61B2
 # ---------------------------------------------------------------------------
 # Django-Q2 (background task queue)
 # ---------------------------------------------------------------------------
+# `Q_WORKERS_DEFAULT` sizes the shared standard-tier pool; `Q_WORKERS_ENTERPRISE`
+# sizes the isolated enterprise pool. `Q_WORKERS` is the legacy env var — read it
+# as a fallback so older `.env` files keep working until they're migrated.
+_legacy_workers = config("Q_WORKERS", default=None)
+
 Q_CLUSTER = {
     "name": "landshark",
-    "workers": config("Q_WORKERS", default=2, cast=int),
+    "workers": config(
+        "Q_WORKERS_DEFAULT",
+        default=int(_legacy_workers) if _legacy_workers is not None else 2,
+        cast=int,
+    ),
     "timeout": 600,
     "retry": 660,
     "orm": "default",
     "save_limit": 500,
     "ack_failures": True,
     "max_attempts": 2,
+    # Named worker pools selected at qcluster startup via `--name <cluster>` or
+    # `Q_CLUSTER_NAME=<cluster>`. Tasks routed with `q_options={"cluster": ...}`
+    # land in the matching pool. See apps/analysis/views.py for routing logic.
+    "ALT_CLUSTERS": {
+        "enterprise": {
+            "workers": config("Q_WORKERS_ENTERPRISE", default=1, cast=int),
+        },
+    },
 }
 
 # ---------------------------------------------------------------------------

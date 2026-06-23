@@ -1,11 +1,12 @@
 from django.db.models import Count, Sum
 from django.utils import timezone
 from rest_framework import generics, status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.analysis.models import COTAnalysis
+from apps.analysis.models import COTAnalysis, FormTemplate
 from apps.documents.models import Document
 
 from .enterprise_serializers import (
@@ -14,6 +15,7 @@ from .enterprise_serializers import (
     EnterpriseOrgDetailSerializer,
     EnterpriseOrgListSerializer,
     EnterpriseOrgMemberSerializer,
+    EnterpriseOrgTemplateSerializer,
     EnterpriseStatsSerializer,
 )
 from .models import Membership, Organization, User
@@ -87,6 +89,80 @@ class EnterpriseOrgMembersView(APIView):
         serializer.is_valid(raise_exception=True)
         membership = serializer.save()
         return Response(EnterpriseOrgMemberSerializer(membership).data, status=status.HTTP_201_CREATED)
+
+
+class EnterpriseOrgTemplatesView(APIView):
+    """List + upload COT templates assigned to an organization (dev admins only).
+
+    Upload auto-preps the DOCX (injects docxtpl markers into a plain form;
+    already-templated docs pass through) and assigns it to the URL's org.
+    """
+
+    permission_classes = [IsAuthenticated, IsEnterprise]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request, pk):
+        templates = (
+            FormTemplate.objects.filter(organization_id=pk)
+            .select_related("uploaded_by")
+            .order_by("-created_at")
+        )
+        return Response(EnterpriseOrgTemplateSerializer(templates, many=True).data)
+
+    def post(self, request, pk):
+        import os
+
+        from django.core.files.base import ContentFile
+
+        from apps.analysis.services.template_intake import (
+            DOCX_MIME,
+            TemplatePreparationError,
+            prepare_template_bytes,
+        )
+
+        try:
+            org = Organization.objects.get(pk=pk)
+        except Organization.DoesNotExist:
+            return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        uploaded = request.FILES.get("file")
+        if not uploaded:
+            return Response({"detail": "A .docx file is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if (uploaded.content_type or "") != DOCX_MIME and not uploaded.name.lower().endswith(".docx"):
+            return Response({"detail": "Only .docx files are allowed."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            prepared = prepare_template_bytes(uploaded)
+        except TemplatePreparationError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            return Response({"detail": f"Could not process this DOCX: {exc}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = (request.data.get("name") or "").strip() or os.path.splitext(uploaded.name)[0]
+        template = FormTemplate(
+            name=name,
+            organization=org,
+            uploaded_by=request.user,
+            original_filename=uploaded.name,
+            file_size=len(prepared),
+            mime_type=DOCX_MIME,
+        )
+        template.file.save(uploaded.name, ContentFile(prepared), save=True)
+        return Response(EnterpriseOrgTemplateSerializer(template).data, status=status.HTTP_201_CREATED)
+
+
+class EnterpriseOrgTemplateDetailView(APIView):
+    """Delete a COT template from an organization (dev admins only)."""
+
+    permission_classes = [IsAuthenticated, IsEnterprise]
+
+    def delete(self, request, pk, template_id):
+        try:
+            template = FormTemplate.objects.get(pk=template_id, organization_id=pk)
+        except FormTemplate.DoesNotExist:
+            return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
+        template.delete()  # post_delete signal removes the stored file
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class EnterpriseApiUsageView(APIView):

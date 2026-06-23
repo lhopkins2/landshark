@@ -48,6 +48,10 @@ echo "==> Installing Python dependencies..."
 echo "==> Running migrations..."
 cd "$APP_DIR/backend"
 "$VENV/bin/python" manage.py migrate --noinput
+# Assert the schema is fully migrated before we restart any services. `set -e`
+# aborts the deploy here if anything is still unapplied, so web/worker never get
+# restarted against a stale schema (the cause of "no such column" errors).
+"$VENV/bin/python" manage.py migrate --check
 
 echo "==> Collecting static files..."
 "$VENV/bin/python" manage.py collectstatic --noinput --clear
@@ -67,17 +71,27 @@ chown -R landshark:landshark "$APP_DIR" "$FRONTEND_DIR"
 echo "==> Updating systemd units..."
 cp "$APP_DIR/deploy/landshark-backup.service" /etc/systemd/system/
 cp "$APP_DIR/deploy/landshark-backup.timer" /etc/systemd/system/
+# Refresh the worker unit files in case ExecStart or env wiring changed
+# (e.g. when the standard/enterprise pool split was introduced).
+cp "$APP_DIR/deploy/landshark-worker.service" /etc/systemd/system/
+cp "$APP_DIR/deploy/landshark-worker-enterprise.service" /etc/systemd/system/
 systemctl daemon-reload
+
+# Make sure the enterprise worker is enabled — first deploy after the split
+# won't have done this yet.
+systemctl enable landshark-worker-enterprise >/dev/null 2>&1 || true
 
 echo "==> Restarting services..."
 systemctl restart landshark-web
 systemctl restart landshark-worker
+systemctl restart landshark-worker-enterprise
 
 echo "==> Reloading Nginx..."
 systemctl reload nginx
 
 echo ""
 echo "=== Deploy complete ==="
-echo "Web:    $(systemctl is-active landshark-web)"
-echo "Worker: $(systemctl is-active landshark-worker)"
-echo "Nginx:  $(systemctl is-active nginx)"
+echo "Web:                $(systemctl is-active landshark-web)"
+echo "Worker (default):   $(systemctl is-active landshark-worker)"
+echo "Worker (enterprise):$(systemctl is-active landshark-worker-enterprise)"
+echo "Nginx:              $(systemctl is-active nginx)"

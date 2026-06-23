@@ -17,7 +17,7 @@ class EnterpriseOrgListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Organization
-        fields = ["id", "name", "is_active", "member_count", "created_at", "updated_at"]
+        fields = ["id", "name", "is_active", "tier", "member_count", "created_at", "updated_at"]
         read_only_fields = ["id"]
 
 
@@ -26,7 +26,7 @@ class EnterpriseOrgDetailSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Organization
-        fields = ["id", "name", "is_active", "member_count", "created_at", "updated_at"]
+        fields = ["id", "name", "is_active", "tier", "member_count", "created_at", "updated_at"]
         read_only_fields = ["id"]
 
 
@@ -34,6 +34,11 @@ class EnterpriseOrgCreateSerializer(serializers.Serializer):
     """Create an organization with its initial admin user."""
 
     name = serializers.CharField(max_length=255)
+    tier = serializers.ChoiceField(
+        choices=Organization.Tier.choices,
+        default=Organization.Tier.STANDARD,
+        required=False,
+    )
     admin_email = serializers.EmailField()
     admin_first_name = serializers.CharField(max_length=150, required=False, default="")
     admin_last_name = serializers.CharField(max_length=150, required=False, default="")
@@ -46,7 +51,10 @@ class EnterpriseOrgCreateSerializer(serializers.Serializer):
 
     @transaction.atomic
     def create(self, validated_data):
-        org = Organization.objects.create(name=validated_data["name"])
+        org = Organization.objects.create(
+            name=validated_data["name"],
+            tier=validated_data.get("tier", Organization.Tier.STANDARD),
+        )
         user = User.objects.create_user(
             email=validated_data["admin_email"],
             password=validated_data["admin_password"],
@@ -70,6 +78,23 @@ class EnterpriseOrgMemberSerializer(serializers.Serializer):
     has_api_key_access = serializers.BooleanField()
     is_active = serializers.BooleanField(source="user.is_active")
     created_at = serializers.DateTimeField()
+
+
+class EnterpriseOrgTemplateSerializer(serializers.Serializer):
+    """Read-only serializer for a FormTemplate in the enterprise org context."""
+
+    id = serializers.UUIDField()
+    name = serializers.CharField()
+    original_filename = serializers.CharField()
+    file_size = serializers.IntegerField()
+    uploaded_by_name = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField()
+
+    def get_uploaded_by_name(self, obj) -> str | None:
+        u = getattr(obj, "uploaded_by", None)
+        if not u:
+            return None
+        return f"{u.first_name} {u.last_name}".strip() or u.email
 
 
 class EnterpriseAddMemberSerializer(serializers.Serializer):

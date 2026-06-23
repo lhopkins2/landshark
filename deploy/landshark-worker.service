@@ -1,5 +1,5 @@
 [Unit]
-Description=LandShark Django-Q2 Background Worker
+Description=LandShark Django-Q2 Worker (default/standard-tier pool)
 After=network.target postgresql.service
 Requires=postgresql.service
 
@@ -8,7 +8,15 @@ User=landshark
 Group=landshark
 WorkingDirectory=/opt/landshark/backend
 EnvironmentFile=/opt/landshark/.env
-ExecStart=/opt/landshark/venv/bin/python manage.py qcluster
+# Refuse to start if migrations are pending — fail fast with a clear error
+# instead of running stale code against a mismatched schema (the "fields do not
+# exist in this model" / "no such column" class of bug). `deploy.sh` migrates
+# before restarting, so this only trips on a manual restart that skipped migrate.
+ExecStartPre=/opt/landshark/venv/bin/python manage.py migrate --check
+# `--name landshark` matches Q_CLUSTER["name"] in settings.py — this worker
+# polls the default (standard-tier) queue. Enterprise-tier analyses run in
+# landshark-worker-enterprise.service.
+ExecStart=/opt/landshark/venv/bin/python manage.py qcluster --name landshark
 Restart=on-failure
 RestartSec=5
 KillMode=mixed

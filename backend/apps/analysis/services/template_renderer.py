@@ -69,9 +69,17 @@ def build_template_context(
 
     Keys mirror the placeholders documented in the starter template. New keys
     can be added freely without breaking templates that don't reference them.
+
+    Header values come from `resolve_header_values`: the operator's per-run
+    `analysis.header_fields` win, falling back to the saved chain/document
+    records. `legal_description` (the explicit arg) is kept only as a final
+    fallback for callers that pass it directly.
     """
-    chain = getattr(document, "chain_of_title", None) if document else None
-    chain_legal = (getattr(chain, "legal_description", "") or "") if chain else ""
+    from .header import resolve_header_values
+
+    h = resolve_header_values(
+        document, analysis.header_fields, title_agent_name, getattr(analysis, "header_extracted", None)
+    )
 
     # Flatten every parsed_document's instruments into one ordered list,
     # sorted chronologically (the template's `{% tr for inst in instruments %}`
@@ -91,29 +99,28 @@ def build_template_context(
     begin_iso = (begin.get("recording_date") or begin.get("instrument_date") or "") if begin else ""
     end_iso = (end.get("recording_date") or end.get("instrument_date") or "") if end else ""
 
-    address = (getattr(chain, "property_address", "") or "") if chain else ""
-    county = (getattr(chain, "county", "") or "") if chain else ""
-    state = (getattr(chain, "state", "") or "") if chain else ""
-    parcel = (getattr(chain, "parcel_number", "") or "") if chain else ""
+    legal = h.get("legal_description", "") or (legal_description or "").strip()
 
     return {
-        # Header fields
-        "tax_id": parcel,
-        "parcel_number": parcel,
-        "tract_number": (document.tract_number or "") if document else "",
-        "record_holder": (document.last_record_holder or "") if document else "",
-        "record_owner": (document.last_record_holder or "") if document else "",  # alias for shop wording
-        "property_address": address,
-        "address": address,
-        "county": county,
-        "state": state,
-        "county_state": ", ".join(p for p in (county, state) if p),
-        "legal_description": (legal_description or "").strip() or chain_legal,
-        "description": (legal_description or "").strip() or chain_legal,  # alias
-        "acres": "",  # reserved for future ChainOfTitle.acres field
+        # Header fields (resolved: operator override → saved records)
+        "tax_id": h.get("tax_id", ""),
+        "parcel_number": h.get("tax_id", ""),
+        "tract_number": h.get("tract_number", ""),
+        "record_holder": h.get("record_owner", ""),
+        "record_owner": h.get("record_owner", ""),  # alias for shop wording
+        "property_address": h.get("address", ""),
+        "address": h.get("address", ""),
+        "county": h.get("county", ""),
+        "state": h.get("state", ""),
+        "county_state": h.get("county_state", ""),
+        "legal_description": legal,
+        "description": legal,  # alias
+        "acres": h.get("acres", ""),
         "begin_search_date": format_display_date(begin_iso),
         "end_search_date": format_display_date(end_iso),
-        "title_agent": title_agent_name or "",
+        "title_agent": h.get("title_agent", ""),
+        # Subject Premises (the operator's recommended search basis) — its own section.
+        "subject_premises": legal,
         # Repeating block
         "instruments": rows,
         # Narrative / notes
@@ -135,10 +142,11 @@ def render_with_template(
     method (e.g., a Django FieldFile or BytesIO). docxtpl needs a file path or
     a BytesIO, so we normalize.
 
-    Placeholders are injected at render time (idempotent — already-templated docs
-    pass straight through). This is the safety net that makes plain templates
-    work even if they were uploaded before upload-time injection existed, so a
-    shop never has to re-upload.
+    Placeholders are auto-prepared at render time (idempotent): a template that
+    already contains docxtpl markers passes through untouched, while a plain
+    customer form (just labels + an empty instrument table) gets its fill-in
+    markers injected so it actually fills with data. Without this, a plain
+    template renders as the empty form.
     """
     from docxtpl import DocxTemplate
 
@@ -155,7 +163,7 @@ def render_with_template(
         with open(template_path_or_fileobj, "rb") as fh:
             data = fh.read()
 
-    # Inject placeholders if missing; passthrough if the doc is already templated.
+    # Inject fill-in markers if missing; passthrough if already templated.
     data = prepare_uploaded_template(data)
 
     doc = DocxTemplate(io.BytesIO(data))

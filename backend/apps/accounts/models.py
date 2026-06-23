@@ -7,8 +7,18 @@ from .managers import UserManager
 
 
 class Organization(TimestampedModel):
+    class Tier(models.TextChoices):
+        STANDARD = "standard", "Standard"
+        ENTERPRISE = "enterprise", "Enterprise"
+
     name = models.CharField(max_length=255)
     is_active = models.BooleanField(default=True)
+    tier = models.CharField(
+        max_length=20,
+        choices=Tier.choices,
+        default=Tier.STANDARD,
+        help_text="Determines which Django-Q worker cluster the org's analyses are routed to.",
+    )
 
     class Meta(TimestampedModel.Meta):
         pass

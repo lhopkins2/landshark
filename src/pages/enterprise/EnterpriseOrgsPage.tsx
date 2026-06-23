@@ -101,6 +101,7 @@ export default function EnterpriseOrgsPage() {
           <thead>
             <tr style={{ borderBottom: "1px solid var(--ls-border)" }}>
               <Th>Organization</Th>
+              <Th>Tier</Th>
               <Th>Members</Th>
               <Th>Status</Th>
               <Th>Created</Th>
@@ -108,9 +109,9 @@ export default function EnterpriseOrgsPage() {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={4} style={{ padding: "var(--ls-space-lg)", textAlign: "center", color: "var(--ls-text-muted)", fontSize: "var(--ls-text-sm)" }}>Loading...</td></tr>
+              <tr><td colSpan={5} style={{ padding: "var(--ls-space-lg)", textAlign: "center", color: "var(--ls-text-muted)", fontSize: "var(--ls-text-sm)" }}>Loading...</td></tr>
             ) : !orgs?.length ? (
-              <tr><td colSpan={4} style={{ padding: "var(--ls-space-lg)", textAlign: "center", color: "var(--ls-text-muted)", fontSize: "var(--ls-text-sm)" }}>No organizations found</td></tr>
+              <tr><td colSpan={5} style={{ padding: "var(--ls-space-lg)", textAlign: "center", color: "var(--ls-text-muted)", fontSize: "var(--ls-text-sm)" }}>No organizations found</td></tr>
             ) : (
               orgs.map((org) => <OrgRow key={org.id} org={org} />)
             )}
@@ -156,6 +157,19 @@ function OrgRow({ org }: { org: EnterpriseOrg }) {
           <Building2 size={16} style={{ color: "var(--ls-text-muted)" }} />
           <span style={{ fontSize: "var(--ls-text-sm)", fontWeight: 500 }}>{org.name}</span>
         </Link>
+      </td>
+      <td style={{ padding: "var(--ls-space-sm) var(--ls-space-md)" }}>
+        <span style={{
+          fontSize: "var(--ls-text-xs)",
+          padding: "2px 8px",
+          borderRadius: "var(--ls-radius-sm)",
+          backgroundColor: org.tier === "enterprise" ? "rgba(139,105,20,0.12)" : "rgba(100,100,100,0.1)",
+          color: org.tier === "enterprise" ? "var(--ls-primary)" : "var(--ls-text-secondary)",
+          fontWeight: 600,
+          textTransform: "capitalize",
+        }}>
+          {org.tier}
+        </span>
       </td>
       <td style={{ padding: "var(--ls-space-sm) var(--ls-space-md)", fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)" }}>
         {org.member_count}

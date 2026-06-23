@@ -1,9 +1,15 @@
+import logging
+
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils import timezone
 from encrypted_model_fields.fields import EncryptedCharField
 
 from apps.core.models import TimestampedModel
+
+logger = logging.getLogger(__name__)
 
 
 def _template_upload_path(instance: "FormTemplate", filename: str) -> str:
@@ -55,6 +61,21 @@ class FormTemplate(TimestampedModel):
 
     def __str__(self) -> str:
         return self.name
+
+
+@receiver(post_delete, sender=FormTemplate)
+def _delete_form_template_file(sender, instance: FormTemplate, **kwargs) -> None:
+    """Remove the underlying DOCX from storage when a FormTemplate row is deleted.
+
+    Django's FileField doesn't delete files on row deletion by default. Mirrors
+    the Document cleanup signal in apps/documents/models.py.
+    """
+    if not instance.file:
+        return
+    try:
+        instance.file.delete(save=False)
+    except Exception:
+        logger.warning("Failed to delete file for FormTemplate %s from storage", instance.pk, exc_info=True)
 
 
 class UserSettings(TimestampedModel):
@@ -150,6 +171,15 @@ class COTAnalysis(TimestampedModel):
     # underlying Document (FK is SET_NULL) so the review history can still label
     # the row and flag it as "source deleted".
     document_name_snapshot = models.CharField(max_length=255, blank=True, default="")
+    # Operator-entered report-header values (tax_id, tract_number, record_owner,
+    # address, acres, title_agent, legal_description). Prefilled from the chain/
+    # document on the Analyze form, editable per run. Empty dict = legacy/no override,
+    # in which case renderers fall back to the saved records. See services/header.py.
+    header_fields = models.JSONField(default=dict, blank=True)
+    # AI-extracted header values (tax_id, record_owner, address, acres) pulled from
+    # the analyzed instruments during the pipeline. Used to fill header fields the
+    # operator left blank. Operator entries always win over these. See services/header_extract.py.
+    header_extracted = models.JSONField(default=dict, blank=True)
     form_template = models.ForeignKey(
         FormTemplate,
         on_delete=models.SET_NULL,

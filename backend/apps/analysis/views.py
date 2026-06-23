@@ -7,12 +7,12 @@ from django.utils import timezone
 from django_q.tasks import async_task
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.mixins import get_user_organization
+from apps.accounts.models import Organization
 from apps.accounts.permissions import HasApiKeyAccess, IsOrgAdmin
 from apps.core.audit import log_action
 from apps.core.models import AuditLog
@@ -23,7 +23,6 @@ from .serializers import (
     COTAnalysisDebugSerializer,
     COTAnalysisSerializer,
     FormTemplateSerializer,
-    FormTemplateUploadSerializer,
     OrganizationSettingsSerializer,
     ReanalyzeSerializer,
     RunAnalysisSerializer,
@@ -36,6 +35,21 @@ from .utils import STALE_ANALYSIS_TIMEOUT, is_qcluster_running, recover_stale_an
 logger = logging.getLogger(__name__)
 
 
+def _cluster_for_user(user: Any) -> str | None:
+    """Return the Django-Q2 cluster name an analysis enqueued by `user` should run on.
+
+    Enterprise-tier orgs get the isolated `enterprise` pool. Everyone else
+    (standard-tier orgs, developers, orgless users) returns None, which means
+    "the default unnamed cluster" to `async_task`. See settings.Q_CLUSTER and
+    its `ALT_CLUSTERS` entry, plus `deploy/landshark-worker-enterprise.service`,
+    for the worker side.
+    """
+    org = get_user_organization(user)
+    if org is not None and org.tier == Organization.Tier.ENTERPRISE:
+        return "enterprise"
+    return None
+
+
 def _user_visible_form_template(user: Any, template_id: str) -> "FormTemplate":
     """Look up a FormTemplate scoped to the user's org.
 
@@ -44,6 +58,7 @@ def _user_visible_form_template(user: Any, template_id: str) -> "FormTemplate":
     `FormTemplate.DoesNotExist` if the lookup misses, so the caller can 404.
     """
     from django.db.models import Q
+
     qs = FormTemplate.objects.all()
     if not getattr(user, "is_developer", False):
         membership = getattr(user, "membership", None)
@@ -105,18 +120,28 @@ def resolve_api_config(user: Any) -> tuple[str, str, dict[str, str]]:
         pass
 
     if user_settings:
-        return user_settings.default_provider, user_settings.default_model, {
-            "anthropic": user_settings.anthropic_api_key,
-            "openai": user_settings.openai_api_key,
-            "gemini": user_settings.gemini_api_key,
-        }
+        return (
+            user_settings.default_provider,
+            user_settings.default_model,
+            {
+                "anthropic": user_settings.anthropic_api_key,
+                "openai": user_settings.openai_api_key,
+                "gemini": user_settings.gemini_api_key,
+            },
+        )
     return "anthropic", "", {"anthropic": "", "openai": "", "gemini": ""}
 
 
-class FormTemplateViewSet(viewsets.ModelViewSet):
+class FormTemplateViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only access to an org's COT templates (for the Export dropdown).
+
+    Templates are managed by dev admins on the Enterprise → Org page
+    (apps.accounts.enterprise_views), not here — org users only list/select.
+    """
+
     queryset = FormTemplate.objects.select_related("uploaded_by", "organization").all()
+    serializer_class = FormTemplateSerializer
     permission_classes = [IsAuthenticated]
-    parser_classes = [JSONParser, MultiPartParser, FormParser]
     search_fields = ["name", "description"]
     ordering_fields = ["name", "created_at"]
 
@@ -131,29 +156,10 @@ class FormTemplateViewSet(viewsets.ModelViewSet):
         # Prefer the direct organization FK; fall back to uploader's membership for legacy rows
         # that haven't been backfilled.
         from django.db.models import Q
+
         return qs.filter(
             Q(organization=membership.organization)
             | Q(organization__isnull=True, uploaded_by__membership__organization=membership.organization)
-        )
-
-    def get_serializer_class(self) -> type:
-        if self.action == "create":
-            return FormTemplateUploadSerializer
-        return FormTemplateSerializer
-
-    def create(self, request: Any, *args: Any, **kwargs: Any) -> Response:
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        template = serializer.save()
-        # Stamp the org FK from the uploader's membership so future queries don't need the join.
-        membership = getattr(request.user, "membership", None)
-        if membership and not template.organization_id:
-            template.organization = membership.organization
-            template.save(update_fields=["organization", "updated_at"])
-
-        return Response(
-            FormTemplateSerializer(template, context={"request": request}).data,
-            status=status.HTTP_201_CREATED,
         )
 
     @action(detail=False, methods=["get"], url_path="starter", permission_classes=[IsAuthenticated])
@@ -225,9 +231,7 @@ class COTAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ["created_at"]
 
     def get_queryset(self) -> Any:
-        return COTAnalysis.objects.filter(created_by=self.request.user).select_related(
-            "document", "generated_document"
-        )
+        return COTAnalysis.objects.filter(created_by=self.request.user).select_related("document", "generated_document")
 
     def retrieve(self, request: Any, *args: Any, **kwargs: Any) -> Response:
         recover_stale_analyses()
@@ -295,11 +299,19 @@ class RunAnalysisView(APIView):
         output_format = serializer.validated_data.get("output_format", "pdf")
         legal_description = serializer.validated_data.get("legal_description", "")
 
+        # Operator-entered report-header values (prefilled + editable on the form).
+        from .services.header import EDITABLE_HEADER_KEYS
+
+        header_fields = {key: serializer.validated_data.get(key, "") or "" for key in EDITABLE_HEADER_KEYS}
+        # `legal_description` is also its own param above; keep it in the header dict too.
+        header_fields["legal_description"] = legal_description
+
         analysis = COTAnalysis.objects.create(
             document=document,
             document_name_snapshot=document.original_filename or "",
             analysis_order=serializer.validated_data["analysis_order"],
             output_format=output_format,
+            header_fields=header_fields,
             status=COTAnalysis.Status.PROCESSING,
             progress_step=COTAnalysis.ProgressStep.QUEUED,
             ai_provider=provider,
@@ -334,6 +346,7 @@ class RunAnalysisView(APIView):
             legal_description,
             task_name=f"analysis-{analysis.id}",
             timeout=480,
+            cluster=_cluster_for_user(request.user),
         )
 
         return Response(
@@ -403,9 +416,7 @@ class ReanalyzeView(APIView):
 
         output_format = serializer.validated_data.get("output_format") or parent.output_format
 
-        snapshot_name = (
-            parent.document.original_filename if parent.document else parent.document_name_snapshot
-        ) or ""
+        snapshot_name = (parent.document.original_filename if parent.document else parent.document_name_snapshot) or ""
         analysis = COTAnalysis.objects.create(
             document=parent.document,
             document_name_snapshot=snapshot_name,
@@ -417,6 +428,8 @@ class ReanalyzeView(APIView):
             ai_model=model,
             created_by=request.user,
             parent_analysis=parent,
+            # Carry the operator's report-header values onto the revision.
+            header_fields=parent.header_fields or {},
             revision_instructions=serializer.validated_data.get("user_instructions", "") or "",
             revision_kind=COTAnalysis.RevisionKind.REVISION,
         )
@@ -454,6 +467,7 @@ class ReanalyzeView(APIView):
             parent.analysis_order,
             task_name=f"reanalyze-{analysis.id}",
             timeout=480,
+            cluster=_cluster_for_user(request.user),
         )
 
         return Response(
@@ -542,6 +556,7 @@ class ExportAnalysisView(APIView):
             # the shop authored. We pass the user's analyze-time legal description + title agent
             # so the header section matches what the markdown renderer would have produced.
             from .tasks import _resolve_title_agent_name
+
             agent_name = _resolve_title_agent_name(request.user)
             try:
                 buf = render_analysis_with_template(
@@ -622,13 +637,15 @@ class WorkerHealthView(APIView):
 
     def get(self, request: Any) -> Response:
         alive = is_qcluster_running()
-        return Response({
-            "worker_running": alive,
-            "stale_count": COTAnalysis.objects.filter(
-                status=COTAnalysis.Status.PROCESSING,
-                created_at__lt=timezone.now() - datetime.timedelta(seconds=STALE_ANALYSIS_TIMEOUT),
-            ).count(),
-        })
+        return Response(
+            {
+                "worker_running": alive,
+                "stale_count": COTAnalysis.objects.filter(
+                    status=COTAnalysis.Status.PROCESSING,
+                    created_at__lt=timezone.now() - datetime.timedelta(seconds=STALE_ANALYSIS_TIMEOUT),
+                ).count(),
+            }
+        )
 
 
 class DashboardStatsView(APIView):
@@ -657,24 +674,27 @@ class DashboardStatsView(APIView):
         recent = analysis_qs.select_related("document", "created_by").order_by("-created_at")[:10]
         activity = []
         for a in recent:
-            activity.append({
-                "id": str(a.id),
-                "type": "analysis",
-                "status": a.status,
-                "document_name": a.document.original_filename if a.document else None,
-                "created_by_name": (
-                    f"{a.created_by.first_name} {a.created_by.last_name}".strip()
-                    if a.created_by else None
-                ),
-                "created_at": a.created_at.isoformat(),
-            })
+            activity.append(
+                {
+                    "id": str(a.id),
+                    "type": "analysis",
+                    "status": a.status,
+                    "document_name": a.document.original_filename if a.document else None,
+                    "created_by_name": (
+                        f"{a.created_by.first_name} {a.created_by.last_name}".strip() if a.created_by else None
+                    ),
+                    "created_at": a.created_at.isoformat(),
+                }
+            )
 
-        return Response({
-            "total_documents": total_documents,
-            "analyses_this_month": analyses_this_month,
-            "pending_analyses": pending_analyses,
-            "recent_activity": activity,
-        })
+        return Response(
+            {
+                "total_documents": total_documents,
+                "analyses_this_month": analyses_this_month,
+                "pending_analyses": pending_analyses,
+                "recent_activity": activity,
+            }
+        )
 
 
 class BackupStatusView(APIView):

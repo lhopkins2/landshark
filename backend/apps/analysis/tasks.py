@@ -80,6 +80,7 @@ def _save_pipeline_result_to_analysis(analysis: COTAnalysis, result: PipelineRes
     analysis.narrative = result.get("narrative", "")
     analysis.notes = result.get("notes")
     analysis.failed_pages_count = result.get("failed_pages_count", 0)
+    analysis.header_extracted = result.get("header_extracted") or {}
     analysis.input_tokens = usage.get("input_tokens", 0)
     analysis.output_tokens = usage.get("output_tokens", 0)
     analysis.result_text = full_markdown
@@ -91,6 +92,7 @@ def _save_pipeline_result_to_analysis(analysis: COTAnalysis, result: PipelineRes
         "narrative",
         "notes",
         "failed_pages_count",
+        "header_extracted",
         "input_tokens",
         "output_tokens",
         "result_text",
@@ -242,6 +244,7 @@ def _run_new_pipeline(
         legal_description=legal_description,
         analysis_order=analysis_order,
         title_agent_name=_resolve_title_agent_name(user),
+        header_fields=analysis.header_fields or {},
     )
 
     # result_text holds a markdown document (table + narrative + notes) for the PDF/DOCX generator.

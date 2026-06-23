@@ -1,9 +1,9 @@
 /**
  * Export modal for analyzed-COT outputs.
  *
- * Lets the user rename the file, swap between PDF/DOCX, and optionally strip
- * the "Doc Pg" column before downloading. Re-renders server-side from the
- * analysis's stored markdown — no PDF round-tripping.
+ * Lets the user choose the Standard (built-in) layout or a Custom uploaded
+ * template, rename the file, swap PDF/DOCX (standard only), and optionally strip
+ * the "Doc Pg" column. Re-renders server-side from the analysis's stored data.
  */
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -117,35 +117,39 @@ export default function ExportModal({ analysisId, defaultBaseName, sourceFormat,
             </div>
           </label>
 
-          {templates.length > 0 && (
-            <label style={{ display: "grid", gap: 4 }}>
-              <span style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-secondary)" }}>
-                Template
-              </span>
-              <select
-                value={templateId}
-                onChange={(e) => setTemplateId(e.target.value)}
-                disabled={exportMutation.isPending}
-                style={{
-                  padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
-                  border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
-                  fontSize: "var(--ls-text-sm)", outline: "none", color: "var(--ls-text)",
-                }}
-              >
-                <option value="">Default (plain layout)</option>
-                {templates.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-              {templateId && (
-                <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
-                  Templated exports are DOCX only.
-                </span>
+          <label style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-secondary)" }}>
+              Template
+            </span>
+            <select
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+              disabled={exportMutation.isPending}
+              style={{
+                padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+                border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+                fontSize: "var(--ls-text-sm)", outline: "none", color: "var(--ls-text)",
+              }}
+            >
+              <option value="">Standard (built-in layout)</option>
+              {templates.length > 0 && (
+                <optgroup label="Custom templates">
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
               )}
-            </label>
-          )}
+            </select>
+            <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)" }}>
+              {templateId
+                ? "Custom template — exports as DOCX in your saved layout."
+                : templates.length > 0
+                  ? "Standard built-in layout (PDF or DOCX). Pick a custom template above for your own design."
+                  : "Standard built-in layout. Add custom templates in Settings → COT Templates."}
+            </span>
+          </label>
 
           <div style={{ display: "grid", gap: 4 }}>
             <span style={{ fontSize: "var(--ls-text-xs)", fontWeight: 600, color: "var(--ls-text-secondary)" }}>

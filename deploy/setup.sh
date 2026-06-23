@@ -68,10 +68,11 @@ fi
 echo "==> Installing systemd services..."
 cp "$APP_DIR/deploy/landshark-web.service" /etc/systemd/system/
 cp "$APP_DIR/deploy/landshark-worker.service" /etc/systemd/system/
+cp "$APP_DIR/deploy/landshark-worker-enterprise.service" /etc/systemd/system/
 cp "$APP_DIR/deploy/landshark-backup.service" /etc/systemd/system/
 cp "$APP_DIR/deploy/landshark-backup.timer" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable landshark-web landshark-worker landshark-backup.timer
+systemctl enable landshark-web landshark-worker landshark-worker-enterprise landshark-backup.timer
 
 echo "==> Configuring Nginx..."
 cp "$APP_DIR/deploy/nginx.conf" "/etc/nginx/sites-available/landshark"

@@ -1,0 +1,24 @@
+[Unit]
+Description=LandShark Django-Q2 Worker (enterprise-tier pool)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+User=landshark
+Group=landshark
+WorkingDirectory=/opt/landshark/backend
+EnvironmentFile=/opt/landshark/.env
+# Refuse to start if migrations are pending — fail fast instead of running stale
+# code against a mismatched schema. See landshark-worker.service for rationale.
+ExecStartPre=/opt/landshark/venv/bin/python manage.py migrate --check
+# Polls the `enterprise` queue (Q_CLUSTER["ALT_CLUSTERS"]["enterprise"] in
+# settings.py). Worker count is set via Q_WORKERS_ENTERPRISE in /opt/landshark/.env.
+ExecStart=/opt/landshark/venv/bin/python manage.py qcluster --name enterprise
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+StandardOutput=append:/var/log/landshark/worker-enterprise.log
+StandardError=append:/var/log/landshark/worker-enterprise.log
+
+[Install]
+WantedBy=multi-user.target

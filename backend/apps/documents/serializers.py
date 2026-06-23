@@ -25,6 +25,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     folder_name = serializers.SerializerMethodField()
     analysis_id = serializers.SerializerMethodField()
     source_document_id = serializers.SerializerMethodField()
+    suggested_header = serializers.SerializerMethodField()
 
     class Meta:
         model = Document
@@ -33,7 +34,7 @@ class DocumentSerializer(serializers.ModelSerializer):
             "mime_type", "tract_number", "last_record_holder", "description",
             "uploaded_by", "uploaded_by_name",
             "download_url", "chain_of_title_address", "analysis_id", "source_document_id",
-            "created_at", "updated_at",
+            "suggested_header", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "uploaded_by", "file_size", "mime_type"]
 
@@ -80,6 +81,21 @@ class DocumentSerializer(serializers.ModelSerializer):
         """
         analysis = obj.generated_from_analysis.only("document_id").first()
         return str(analysis.document_id) if analysis and analysis.document_id else None
+
+    def get_suggested_header(self, obj: Document) -> dict[str, str]:
+        """Prefill values for the Analyze form's report-header fields.
+
+        Computed from the saved chain/document records (+ current user as the
+        default title agent). The operator can edit any of these before running.
+        """
+        from apps.analysis.services.header import header_defaults
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        title_default = ""
+        if user is not None and getattr(user, "is_authenticated", False):
+            title_default = (user.get_full_name() or "").strip() or (user.email or "")
+        return header_defaults(obj, title_default)
 
 
 class DocumentUploadSerializer(serializers.ModelSerializer):

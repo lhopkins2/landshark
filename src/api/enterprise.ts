@@ -9,10 +9,13 @@ interface EnterpriseStats {
   total_analyses: number;
 }
 
+export type OrgTier = "standard" | "enterprise";
+
 export interface EnterpriseOrg {
   id: string;
   name: string;
   is_active: boolean;
+  tier: OrgTier;
   member_count: number;
   created_at: string;
   updated_at: string;
@@ -27,6 +30,15 @@ export interface EnterpriseOrgMember {
   role: string;
   has_api_key_access: boolean;
   is_active: boolean;
+  created_at: string;
+}
+
+export interface EnterpriseOrgTemplate {
+  id: string;
+  name: string;
+  original_filename: string;
+  file_size: number;
+  uploaded_by_name: string | null;
   created_at: string;
 }
 
@@ -58,6 +70,7 @@ export const enterpriseApi = {
 
   createOrg: (data: {
     name: string;
+    tier?: OrgTier;
     admin_email: string;
     admin_first_name?: string;
     admin_last_name?: string;
@@ -67,7 +80,7 @@ export const enterpriseApi = {
   getOrg: (id: string) =>
     apiClient.get<EnterpriseOrg>(`/enterprise/organizations/${id}/`),
 
-  updateOrg: (id: string, data: { name?: string; is_active?: boolean }) =>
+  updateOrg: (id: string, data: { name?: string; is_active?: boolean; tier?: OrgTier }) =>
     apiClient.patch<EnterpriseOrg>(`/enterprise/organizations/${id}/`, data),
 
   listMembers: (orgId: string) =>
@@ -80,6 +93,17 @@ export const enterpriseApi = {
     password: string;
     role: string;
   }) => apiClient.post<EnterpriseOrgMember>(`/enterprise/organizations/${orgId}/members/`, data),
+
+  listTemplates: (orgId: string) =>
+    apiClient.get<EnterpriseOrgTemplate[]>(`/enterprise/organizations/${orgId}/templates/`),
+
+  uploadTemplate: (orgId: string, data: FormData) =>
+    apiClient.post<EnterpriseOrgTemplate>(`/enterprise/organizations/${orgId}/templates/`, data, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+
+  deleteTemplate: (orgId: string, templateId: string) =>
+    apiClient.delete(`/enterprise/organizations/${orgId}/templates/${templateId}/`),
 
   apiUsage: () => apiClient.get<ApiUsageResponse>("/enterprise/api-usage/"),
 };

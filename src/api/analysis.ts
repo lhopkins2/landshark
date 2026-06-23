@@ -45,6 +45,13 @@ export const analysesApi = {
     analysis_order: string;
     output_format?: string;
     legal_description?: string;
+    // Report-header fields (prefilled + editable on the Analyze form).
+    tax_id?: string;
+    tract_number?: string;
+    record_owner?: string;
+    address?: string;
+    acres?: string;
+    title_agent?: string;
     provider?: string;
     model?: string;
   }) =>
@@ -85,17 +92,11 @@ export const analysesApi = {
     apiClient.get<COTAnalysisDebug>(`/analysis/debug/${id}/`),
 };
 
-/** CRUD + starter download for shop-defined COT templates. */
+/** Read-only template access for org users. Management (upload/delete) lives on the
+ *  Enterprise → Org page (enterpriseApi) — org users only list + select at export. */
 export const formTemplatesApi = {
   list: () => apiClient.get<PaginatedResponse<FormTemplate>>("/form-templates/"),
-  upload: (data: FormData) =>
-    apiClient.post<FormTemplate>("/form-templates/", data, {
-      headers: { "Content-Type": "multipart/form-data" },
-    }),
-  update: (id: string, data: Partial<Pick<FormTemplate, "name" | "description" | "custom_prompt">>) =>
-    apiClient.patch<FormTemplate>(`/form-templates/${id}/`, data),
-  delete: (id: string) => apiClient.delete(`/form-templates/${id}/`),
-  /** Download the bundled starter template — shops customize this in Word, then re-upload. */
+  /** Download the bundled starter template — a reference for authoring a custom template. */
   downloadStarter: async () => {
     const response = await apiClient.get("/form-templates/starter/", { responseType: "blob" });
     const url = window.URL.createObjectURL(response.data);

@@ -12,7 +12,7 @@ import { analysesApi, analysisSettingsApi } from "../api/analysis";
 import { ANALYSIS_ORDERS, PROGRESS_STEPS } from "../utils/constants";
 import { formatFileSize } from "../utils/format";
 import StatusBadge from "../components/StatusBadge";
-import type { Document, DocumentFolder, COTAnalysis, AnalysisOrder } from "../types/models";
+import type { Document, DocumentFolder, COTAnalysis, AnalysisOrder, COTHeaderFields } from "../types/models";
 
 export default function ChainOfTitlePage() {
   const queryClient = useQueryClient();
@@ -23,7 +23,13 @@ export default function ChainOfTitlePage() {
   const [docSearch, setDocSearch] = useState("");
   const [browseFolderId, setBrowseFolderId] = useState<string | null>(null);
 
-  const [legalDescription, setLegalDescription] = useState("");
+  const EMPTY_HEADER: COTHeaderFields = {
+    tax_id: "", tract_number: "", record_owner: "", address: "",
+    acres: "", title_agent: "", legal_description: "",
+  };
+  const [header, setHeader] = useState<COTHeaderFields>(EMPTY_HEADER);
+  const setHeaderField = (key: keyof COTHeaderFields, value: string) =>
+    setHeader((h) => ({ ...h, [key]: value }));
 
   const [analysisOrder, setAnalysisOrder] = useState<AnalysisOrder>("chronological");
 
@@ -62,6 +68,30 @@ export default function ChainOfTitlePage() {
 
   const documents = docsData?.results ?? [];
   const analyses = pastAnalyses?.results ?? [];
+
+  // Prefill the report-header fields from the selected document's saved
+  // chain/document records. The operator can edit any field before running.
+  useEffect(() => {
+    if (!selectedDocId) {
+      setHeader(EMPTY_HEADER);
+      return;
+    }
+    const doc = documents.find((d) => d.id === selectedDocId);
+    const s = doc?.suggested_header;
+    if (s) {
+      setHeader({
+        tax_id: s.tax_id ?? "",
+        tract_number: s.tract_number ?? "",
+        record_owner: s.record_owner ?? "",
+        address: s.address ?? "",
+        acres: s.acres ?? "",
+        title_agent: s.title_agent ?? "",
+        legal_description: s.legal_description ?? "",
+      });
+    }
+    // Only re-run when the selected doc changes (not on every documents refetch).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDocId]);
   const folders = foldersData?.results ?? [];
   const currentBrowseFolder = browseFolderId ? folders.find((f) => f.id === browseFolderId) : null;
 
@@ -114,7 +144,13 @@ export default function ChainOfTitlePage() {
       return analysesApi.run({
         document_id: selectedDocId,
         analysis_order: analysisOrder,
-        legal_description: legalDescription || undefined,
+        legal_description: header.legal_description || undefined,
+        tax_id: header.tax_id || undefined,
+        tract_number: header.tract_number || undefined,
+        record_owner: header.record_owner || undefined,
+        address: header.address || undefined,
+        acres: header.acres || undefined,
+        title_agent: header.title_agent || undefined,
       });
     },
     onSuccess: (res) => {
@@ -383,30 +419,45 @@ export default function ChainOfTitlePage() {
         )}
       </SectionCard>
 
-      <SectionCard title="2. Legal Description">
-        <div>
-          <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
-            Subject Premises Legal Description
-          </label>
-          <textarea
-            value={legalDescription}
-            onChange={(e) => setLegalDescription(e.target.value)}
-            placeholder="Enter the legal description of the Subject Premises (e.g., &quot;Lot 9, Block 6, HOMESTEAD MEADOWS UNIT 6, an Addition to the County of El Paso, according to the plat thereof on file in Book 55, Page 26, Plat Records, El Paso County, Texas&quot;)..."
-            rows={4}
-            style={{
-              width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
-              border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
-              fontSize: "var(--ls-text-sm)", color: "var(--ls-text)",
-              resize: "vertical", fontFamily: "inherit",
-            }}
-          />
-          <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 4 }}>
-            Used to determine "Subject Premises," "Subject Premises and more," or "NOT Subject Premises" for each instrument. If left blank, the AI will use the legal description from the document.
-          </p>
+      <SectionCard title="2. Report Header">
+        <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 0, marginBottom: "var(--ls-space-md)" }}>
+          Auto-generated from the documents during analysis — leave blank to let the AI fill them in,
+          or override any field here. {selectedDocId ? "Prefilled from the document's saved details where available." : ""}
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "var(--ls-space-md)" }}>
+          <HeaderInput label="Tax ID #" value={header.tax_id} onChange={(v) => setHeaderField("tax_id", v)} />
+          <HeaderInput label="Tract #" value={header.tract_number} onChange={(v) => setHeaderField("tract_number", v)} />
+          <HeaderInput label="Record Owner" value={header.record_owner} onChange={(v) => setHeaderField("record_owner", v)} />
+          <HeaderInput label="Acres" value={header.acres} onChange={(v) => setHeaderField("acres", v)} />
+          <HeaderInput label="Address" value={header.address} onChange={(v) => setHeaderField("address", v)} />
+          <HeaderInput label="Title Agent" value={header.title_agent} onChange={(v) => setHeaderField("title_agent", v)} />
         </div>
       </SectionCard>
 
-      <SectionCard title="3. Analysis Options">
+      <SectionCard title="3. Subject Premises (Recommended)">
+        <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
+          Subject Premises Legal Description
+        </label>
+        <textarea
+          value={header.legal_description}
+          onChange={(e) => setHeaderField("legal_description", e.target.value)}
+          placeholder="Enter the legal description of the Subject Premises (e.g., &quot;Lot 9, Block 6, HOMESTEAD MEADOWS UNIT 6, an Addition to the County of El Paso, according to the plat thereof on file in Book 55, Page 26, Plat Records, El Paso County, Texas&quot;)..."
+          rows={4}
+          style={{
+            width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+            border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+            fontSize: "var(--ls-text-sm)", color: "var(--ls-text)",
+            resize: "vertical", fontFamily: "inherit",
+          }}
+        />
+        <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 4 }}>
+          Appears as its own "Subject Premises (Recommended)" section in the report. Also used to determine
+          "Subject Premises," "Subject Premises and more," or "NOT Subject Premises" for each instrument.
+          If left blank, the AI will use the legal description from the document.
+        </p>
+      </SectionCard>
+
+      <SectionCard title="4. Analysis Options">
         <div>
           <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
             Analysis Order
@@ -823,6 +874,26 @@ function HintText({ children }: { children: React.ReactNode }) {
     <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: "var(--ls-space-xs)" }}>
       {children}
     </p>
+  );
+}
+
+function HeaderInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4 }}>
+        {label}
+      </label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+          border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+          fontSize: "var(--ls-text-sm)", color: "var(--ls-text)", outline: "none",
+        }}
+      />
+    </div>
   );
 }
 

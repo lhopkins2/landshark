@@ -8,6 +8,10 @@ User=landshark
 Group=landshark
 WorkingDirectory=/opt/landshark/backend
 EnvironmentFile=/opt/landshark/.env
+# Refuse to start if migrations are pending — fail fast instead of serving
+# requests against a mismatched schema. deploy.sh migrates before restart, so
+# this only trips on a manual restart that skipped migrate.
+ExecStartPre=/opt/landshark/venv/bin/python manage.py migrate --check
 ExecStart=/opt/landshark/venv/bin/gunicorn config.wsgi:application -c /opt/landshark/deploy/gunicorn.conf.py
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=on-failure

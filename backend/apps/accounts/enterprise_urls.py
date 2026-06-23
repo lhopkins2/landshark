@@ -11,5 +11,15 @@ urlpatterns = [
         enterprise_views.EnterpriseOrgMembersView.as_view(),
         name="enterprise-org-members",
     ),
+    path(
+        "organizations/<uuid:pk>/templates/",
+        enterprise_views.EnterpriseOrgTemplatesView.as_view(),
+        name="enterprise-org-templates",
+    ),
+    path(
+        "organizations/<uuid:pk>/templates/<uuid:template_id>/",
+        enterprise_views.EnterpriseOrgTemplateDetailView.as_view(),
+        name="enterprise-org-template-detail",
+    ),
     path("api-usage/", enterprise_views.EnterpriseApiUsageView.as_view(), name="enterprise-api-usage"),
 ]

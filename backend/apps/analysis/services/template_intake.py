@@ -269,6 +269,27 @@ def _append_notes_section(doc: Any) -> None:
     doc.add_paragraph("{%p endif %}")
 
 
+def _append_subject_premises_section(doc: Any) -> None:
+    """Append a 'Subject Premises (Recommended)' section to the document body.
+
+    Filled from the operator's recommended legal description (`subject_premises`).
+    Wrapped in `{%p if subject_premises %}` so it renders nothing when blank.
+    """
+    from docx.shared import Pt
+
+    doc.add_paragraph("{%p if subject_premises %}")
+    heading = doc.add_paragraph()
+    run = heading.add_run("Subject Premises (Recommended)")
+    run.bold = True
+    run.font.size = Pt(11)
+    run.font.name = "Arial"
+    body = doc.add_paragraph()
+    body_run = body.add_run("{{ subject_premises }}")
+    body_run.font.size = Pt(10)
+    body_run.font.name = "Arial"
+    doc.add_paragraph("{%p endif %}")
+
+
 def prepare_uploaded_template(docx_bytes: bytes) -> bytes:
     """Return docx_bytes with placeholders injected, ready for the renderer.
 
@@ -295,8 +316,24 @@ def prepare_uploaded_template(docx_bytes: bytes) -> bytes:
             "table whose header row includes columns like Grantor and Grantee."
         )
     _inject_header_fields(doc)
+    _append_subject_premises_section(doc)
     _append_notes_section(doc)
 
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def prepare_template_bytes(file_obj: Any) -> bytes:
+    """Read an uploaded DOCX file object and return auto-prepped bytes.
+
+    Plain forms get docxtpl markers injected; already-templated docs pass through.
+    Raises TemplatePreparationError if the docx has no recognizable instrument
+    table (caller should surface this as a 400). Shared by every upload path so
+    the prep logic isn't duplicated.
+    """
+    file_obj.seek(0)
+    return prepare_uploaded_template(file_obj.read())
