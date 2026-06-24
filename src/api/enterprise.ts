@@ -33,12 +33,13 @@ export interface EnterpriseOrgMember {
   created_at: string;
 }
 
-export interface EnterpriseOrgTemplate {
+export interface EnterpriseTemplate {
   id: string;
   name: string;
   original_filename: string;
   file_size: number;
   uploaded_by_name: string | null;
+  organizations: { id: string; name: string }[];
   created_at: string;
 }
 
@@ -94,16 +95,25 @@ export const enterpriseApi = {
     role: string;
   }) => apiClient.post<EnterpriseOrgMember>(`/enterprise/organizations/${orgId}/members/`, data),
 
-  listTemplates: (orgId: string) =>
-    apiClient.get<EnterpriseOrgTemplate[]>(`/enterprise/organizations/${orgId}/templates/`),
+  // Template catalog (Enterprise → Templates tab). `orgId` filters to templates assigned to that org.
+  listTemplates: (orgId?: string) =>
+    apiClient.get<EnterpriseTemplate[]>("/enterprise/templates/", {
+      params: orgId ? { organization: orgId } : undefined,
+    }),
 
-  uploadTemplate: (orgId: string, data: FormData) =>
-    apiClient.post<EnterpriseOrgTemplate>(`/enterprise/organizations/${orgId}/templates/`, data, {
+  uploadTemplate: (data: FormData) =>
+    apiClient.post<EnterpriseTemplate>("/enterprise/templates/", data, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
 
-  deleteTemplate: (orgId: string, templateId: string) =>
-    apiClient.delete(`/enterprise/organizations/${orgId}/templates/${templateId}/`),
+  deleteTemplate: (templateId: string) =>
+    apiClient.delete(`/enterprise/templates/${templateId}/`),
+
+  /** Replace the template's full set of assigned org ids. */
+  setTemplateOrgs: (templateId: string, organizationIds: string[]) =>
+    apiClient.put<EnterpriseTemplate>(`/enterprise/templates/${templateId}/`, {
+      organization_ids: organizationIds,
+    }),
 
   apiUsage: () => apiClient.get<ApiUsageResponse>("/enterprise/api-usage/"),
 };

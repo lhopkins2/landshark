@@ -15,8 +15,8 @@ from .enterprise_serializers import (
     EnterpriseOrgDetailSerializer,
     EnterpriseOrgListSerializer,
     EnterpriseOrgMemberSerializer,
-    EnterpriseOrgTemplateSerializer,
     EnterpriseStatsSerializer,
+    EnterpriseTemplateSerializer,
 )
 from .models import Membership, Organization, User
 from .permissions import IsEnterprise
@@ -91,25 +91,26 @@ class EnterpriseOrgMembersView(APIView):
         return Response(EnterpriseOrgMemberSerializer(membership).data, status=status.HTTP_201_CREATED)
 
 
-class EnterpriseOrgTemplatesView(APIView):
-    """List + upload COT templates assigned to an organization (dev admins only).
+class EnterpriseTemplatesView(APIView):
+    """Template catalog: list all templates (filterable by org) + upload (dev admins only).
 
-    Upload auto-preps the DOCX (injects docxtpl markers into a plain form;
-    already-templated docs pass through) and assigns it to the URL's org.
+    A template is a DOCX assigned to any number of orgs. Upload auto-preps the
+    file (injects docxtpl markers into a plain form; already-templated docs pass
+    through). `?organization=<id>` filters to templates assigned to that org.
     """
 
     permission_classes = [IsAuthenticated, IsEnterprise]
     parser_classes = [MultiPartParser, FormParser]
 
-    def get(self, request, pk):
-        templates = (
-            FormTemplate.objects.filter(organization_id=pk)
-            .select_related("uploaded_by")
-            .order_by("-created_at")
-        )
-        return Response(EnterpriseOrgTemplateSerializer(templates, many=True).data)
+    def get(self, request):
+        templates = FormTemplate.objects.select_related("uploaded_by").prefetch_related("organizations")
+        org_id = request.query_params.get("organization")
+        if org_id:
+            templates = templates.filter(organizations__id=org_id)
+        templates = templates.order_by("-created_at")
+        return Response(EnterpriseTemplateSerializer(templates, many=True).data)
 
-    def post(self, request, pk):
+    def post(self, request):
         import os
 
         from django.core.files.base import ContentFile
@@ -119,11 +120,6 @@ class EnterpriseOrgTemplatesView(APIView):
             TemplatePreparationError,
             prepare_template_bytes,
         )
-
-        try:
-            org = Organization.objects.get(pk=pk)
-        except Organization.DoesNotExist:
-            return Response({"detail": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
 
         uploaded = request.FILES.get("file")
         if not uploaded:
@@ -141,24 +137,40 @@ class EnterpriseOrgTemplatesView(APIView):
         name = (request.data.get("name") or "").strip() or os.path.splitext(uploaded.name)[0]
         template = FormTemplate(
             name=name,
-            organization=org,
             uploaded_by=request.user,
             original_filename=uploaded.name,
             file_size=len(prepared),
             mime_type=DOCX_MIME,
         )
         template.file.save(uploaded.name, ContentFile(prepared), save=True)
-        return Response(EnterpriseOrgTemplateSerializer(template).data, status=status.HTTP_201_CREATED)
+        return Response(EnterpriseTemplateSerializer(template).data, status=status.HTTP_201_CREATED)
 
 
-class EnterpriseOrgTemplateDetailView(APIView):
-    """Delete a COT template from an organization (dev admins only)."""
+class EnterpriseTemplateDetailView(APIView):
+    """Delete a template, or replace its full set of org assignments (dev admins only)."""
 
     permission_classes = [IsAuthenticated, IsEnterprise]
 
-    def delete(self, request, pk, template_id):
+    def _get(self, template_id):
+        return FormTemplate.objects.prefetch_related("organizations").get(pk=template_id)
+
+    def put(self, request, template_id):
+        """Set the template's assigned orgs to exactly `organization_ids` (replace)."""
         try:
-            template = FormTemplate.objects.get(pk=template_id, organization_id=pk)
+            template = self._get(template_id)
+        except FormTemplate.DoesNotExist:
+            return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        org_ids = request.data.get("organization_ids", [])
+        if not isinstance(org_ids, list):
+            return Response({"detail": "organization_ids must be a list."}, status=status.HTTP_400_BAD_REQUEST)
+        orgs = list(Organization.objects.filter(id__in=org_ids))
+        template.organizations.set(orgs)
+        return Response(EnterpriseTemplateSerializer(template).data)
+
+    def delete(self, request, template_id):
+        try:
+            template = FormTemplate.objects.get(pk=template_id)
         except FormTemplate.DoesNotExist:
             return Response({"detail": "Template not found."}, status=status.HTTP_404_NOT_FOUND)
         template.delete()  # post_delete signal removes the stored file

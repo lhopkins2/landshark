@@ -19,6 +19,7 @@ import EnterpriseLoginPage from "./pages/enterprise/EnterpriseLoginPage";
 import EnterpriseDashboardPage from "./pages/enterprise/EnterpriseDashboardPage";
 import EnterpriseOrgsPage from "./pages/enterprise/EnterpriseOrgsPage";
 import EnterpriseOrgDetailPage from "./pages/enterprise/EnterpriseOrgDetailPage";
+import EnterpriseTemplatesPage from "./pages/enterprise/EnterpriseTemplatesPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -93,6 +94,7 @@ export default function App() {
         <Route index element={<EnterpriseDashboardPage />} />
         <Route path="organizations" element={<EnterpriseOrgsPage />} />
         <Route path="organizations/:orgId" element={<EnterpriseOrgDetailPage />} />
+        <Route path="templates" element={<EnterpriseTemplatesPage />} />
       </Route>
 
       <Route path="*" element={<NotFoundPage />} />

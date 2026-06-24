@@ -53,21 +53,15 @@ def _cluster_for_user(user: Any) -> str | None:
 def _user_visible_form_template(user: Any, template_id: str) -> "FormTemplate":
     """Look up a FormTemplate scoped to the user's org.
 
-    Developers see everything. Org users see templates in their org (or legacy
-    templates uploaded by an org-mate before the org FK existed). Raises
-    `FormTemplate.DoesNotExist` if the lookup misses, so the caller can 404.
+    Developers see everything. Org users see templates assigned to their org.
+    Raises `FormTemplate.DoesNotExist` if the lookup misses, so the caller can 404.
     """
-    from django.db.models import Q
-
     qs = FormTemplate.objects.all()
     if not getattr(user, "is_developer", False):
         membership = getattr(user, "membership", None)
         if not membership:
             raise FormTemplate.DoesNotExist
-        qs = qs.filter(
-            Q(organization=membership.organization)
-            | Q(organization__isnull=True, uploaded_by__membership__organization=membership.organization)
-        )
+        qs = qs.filter(organizations=membership.organization)
     return qs.get(id=template_id)
 
 
@@ -133,13 +127,13 @@ def resolve_api_config(user: Any) -> tuple[str, str, dict[str, str]]:
 
 
 class FormTemplateViewSet(viewsets.ReadOnlyModelViewSet):
-    """Read-only access to an org's COT templates (for the Export dropdown).
+    """Read-only access to the templates assigned to the user's org (Export dropdown).
 
-    Templates are managed by dev admins on the Enterprise → Org page
+    Templates are managed by dev admins on the Enterprise → Templates tab
     (apps.accounts.enterprise_views), not here — org users only list/select.
     """
 
-    queryset = FormTemplate.objects.select_related("uploaded_by", "organization").all()
+    queryset = FormTemplate.objects.select_related("uploaded_by").prefetch_related("organizations").all()
     serializer_class = FormTemplateSerializer
     permission_classes = [IsAuthenticated]
     search_fields = ["name", "description"]
@@ -153,14 +147,7 @@ class FormTemplateViewSet(viewsets.ReadOnlyModelViewSet):
         membership = getattr(user, "membership", None)
         if not membership:
             return qs.none()
-        # Prefer the direct organization FK; fall back to uploader's membership for legacy rows
-        # that haven't been backfilled.
-        from django.db.models import Q
-
-        return qs.filter(
-            Q(organization=membership.organization)
-            | Q(organization__isnull=True, uploaded_by__membership__organization=membership.organization)
-        )
+        return qs.filter(organizations=membership.organization)
 
     @action(detail=False, methods=["get"], url_path="starter", permission_classes=[IsAuthenticated])
     def starter(self, request: Any) -> Any:

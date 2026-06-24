@@ -80,14 +80,19 @@ class EnterpriseOrgMemberSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
 
 
-class EnterpriseOrgTemplateSerializer(serializers.Serializer):
-    """Read-only serializer for a FormTemplate in the enterprise org context."""
+class EnterpriseTemplateSerializer(serializers.Serializer):
+    """Read serializer for a FormTemplate in the enterprise catalog.
+
+    Includes the list of orgs the template is assigned to (id + name), so the
+    Templates tab can show assignments and filter by org.
+    """
 
     id = serializers.UUIDField()
     name = serializers.CharField()
     original_filename = serializers.CharField()
     file_size = serializers.IntegerField()
     uploaded_by_name = serializers.SerializerMethodField()
+    organizations = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
 
     def get_uploaded_by_name(self, obj) -> str | None:
@@ -95,6 +100,9 @@ class EnterpriseOrgTemplateSerializer(serializers.Serializer):
         if not u:
             return None
         return f"{u.first_name} {u.last_name}".strip() or u.email
+
+    def get_organizations(self, obj) -> list[dict]:
+        return [{"id": str(o.id), "name": o.name} for o in obj.organizations.all()]
 
 
 class EnterpriseAddMemberSerializer(serializers.Serializer):

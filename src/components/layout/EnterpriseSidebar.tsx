@@ -1,10 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Building2, ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { LayoutDashboard, Building2, FileText, ArrowLeft, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useSidebarStore } from "../../stores/sidebarStore";
 
 const navItems = [
   { to: "/enterprise", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/enterprise/organizations", icon: Building2, label: "Organizations" },
+  { to: "/enterprise/templates", icon: FileText, label: "Templates" },
 ];
 
 export default function EnterpriseSidebar() {

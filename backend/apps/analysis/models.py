@@ -41,13 +41,12 @@ class FormTemplate(TimestampedModel):
         help_text="Custom instructions for the AI when using this template. "
         "Overrides the default form template instructions section of the prompt.",
     )
-    organization = models.ForeignKey(
+    organizations = models.ManyToManyField(
         "accounts.Organization",
-        on_delete=models.CASCADE,
-        related_name="form_templates",
-        null=True,
+        related_name="assigned_templates",
         blank=True,
-        help_text="Owning org; null for legacy/dev templates.",
+        help_text="Orgs this template is assigned to. Org users see templates assigned to their org; "
+        "a template can be assigned to any number of orgs. Managed on the Enterprise → Templates tab.",
     )
     uploaded_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
