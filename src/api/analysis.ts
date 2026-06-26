@@ -1,6 +1,7 @@
 import apiClient from "./client";
 import type {
   UserAnalysisSettings,
+  OrganizationAnalysisSettings,
   COTAnalysis,
   COTAnalysisDebug,
   FormTemplate,
@@ -15,6 +16,11 @@ export interface AnalysisSettingsUpdate {
   anthropic_api_key?: string;
   openai_api_key?: string;
   gemini_api_key?: string;
+}
+
+/** Payload accepted by `PUT /api/analysis/org-settings/` (admin only). */
+export interface OrgAnalysisSettingsUpdate extends AnalysisSettingsUpdate {
+  lock_member_api_keys?: boolean;
 }
 
 /** Single entry in the model list returned by `GET /api/analysis/models/`. */
@@ -35,6 +41,14 @@ export const analysisSettingsApi = {
     ),
 };
 
+/** Org-wide AI settings (admin only) — shared key + model + the personal-key lock. */
+export const orgAnalysisSettingsApi = {
+  get: () =>
+    apiClient.get<OrganizationAnalysisSettings>("/analysis/org-settings/"),
+  update: (data: OrgAnalysisSettingsUpdate) =>
+    apiClient.put<OrganizationAnalysisSettings>("/analysis/org-settings/", data),
+};
+
 export const analysesApi = {
   list: (params?: Record<string, string>) =>
     apiClient.get<PaginatedResponse<COTAnalysis>>("/analyses/", { params }),
@@ -52,6 +66,8 @@ export const analysesApi = {
     address?: string;
     acres?: string;
     title_agent?: string;
+    // Optional free-form instruction injected into the Stage 2 narrative prompt.
+    custom_modifier?: string;
     provider?: string;
     model?: string;
   }) =>

@@ -31,6 +31,8 @@ export default function ChainOfTitlePage() {
   const setHeaderField = (key: keyof COTHeaderFields, value: string) =>
     setHeader((h) => ({ ...h, [key]: value }));
 
+  const [customModifier, setCustomModifier] = useState("");
+
   const [analysisOrder, setAnalysisOrder] = useState<AnalysisOrder>("chronological");
 
   const [currentResult, setCurrentResult] = useState<COTAnalysis | null>(null);
@@ -151,6 +153,7 @@ export default function ChainOfTitlePage() {
         address: header.address || undefined,
         acres: header.acres || undefined,
         title_agent: header.title_agent || undefined,
+        custom_modifier: customModifier.trim() || undefined,
       });
     },
     onSuccess: (res) => {
@@ -454,6 +457,26 @@ export default function ChainOfTitlePage() {
           Appears as its own "Subject Premises (Recommended)" section in the report. Also used to determine
           "Subject Premises," "Subject Premises and more," or "NOT Subject Premises" for each instrument.
           If left blank, the AI will use the legal description from the document.
+        </p>
+
+        <label style={{ display: "block", fontSize: "var(--ls-text-xs)", fontWeight: 500, color: "var(--ls-text-secondary)", marginBottom: 4, marginTop: "var(--ls-space-lg)" }}>
+          Custom Modifier (Optional)
+        </label>
+        <textarea
+          value={customModifier}
+          onChange={(e) => setCustomModifier(e.target.value)}
+          placeholder="Add any special instructions for this analysis (e.g., &quot;Treat all transfers within the Smith family as a single ownership period&quot; or &quot;Flag any deeds missing a recording date&quot;)..."
+          rows={3}
+          style={{
+            width: "100%", padding: "8px 12px", borderRadius: "var(--ls-radius-md)",
+            border: "1px solid var(--ls-border)", backgroundColor: "var(--ls-bg)",
+            fontSize: "var(--ls-text-sm)", color: "var(--ls-text)",
+            resize: "vertical", fontFamily: "inherit",
+          }}
+        />
+        <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 4 }}>
+          Free-form guidance injected into the analysis prompt. Use it to steer how the chain is interpreted
+          or the narrative is written. Leave blank for a standard run.
         </p>
       </SectionCard>
 

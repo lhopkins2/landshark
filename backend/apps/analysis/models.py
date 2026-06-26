@@ -124,6 +124,11 @@ class OrganizationSettings(TimestampedModel):
         default=UserSettings.AIProvider.ANTHROPIC,
     )
     default_model = models.CharField(max_length=100, blank=True, default="")
+    # When True, every member of the org (operators AND admins) uses this org's
+    # API key + model for analyses; personal keys/models are ignored. When False,
+    # the per-member rule applies (admins and operators with has_api_key_access
+    # may use their own keys, falling back to the org's). See views.resolve_api_config.
+    lock_member_api_keys = models.BooleanField(default=False)
 
     class Meta(TimestampedModel.Meta):
         verbose_name_plural = "organization settings"

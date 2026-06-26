@@ -79,20 +79,25 @@ def resolve_api_config(user: Any) -> tuple[str, str, dict[str, str]]:
     Prefers personal keys if the user has API key access and any are set;
     otherwise falls back to the organization's settings, then to a final default.
     """
-    from apps.accounts.models import Membership
-
     try:
         user_settings = UserSettings.objects.get(user=user)
     except UserSettings.DoesNotExist:
         user_settings = None
 
-    has_access = getattr(user, "is_developer", False)
-    if not has_access:
-        membership = getattr(user, "membership", None)
-        if membership:
-            has_access = membership.role == "admin" or membership.has_api_key_access
+    membership = getattr(user, "membership", None)
+    org_settings = None
+    if membership is not None:
+        org_settings = OrganizationSettings.objects.filter(organization=membership.organization).first()
 
-    if has_access and user_settings:
+    # An org admin can lock the whole org (incl. other admins) to the org's
+    # key + model. While locked, personal keys/models are ignored entirely.
+    org_locked = bool(org_settings and org_settings.lock_member_api_keys)
+
+    has_access = getattr(user, "is_developer", False)
+    if not has_access and membership is not None:
+        has_access = membership.role == "admin" or membership.has_api_key_access
+
+    if not org_locked and has_access and user_settings:
         key_map = {
             "anthropic": user_settings.anthropic_api_key,
             "openai": user_settings.openai_api_key,
@@ -101,17 +106,16 @@ def resolve_api_config(user: Any) -> tuple[str, str, dict[str, str]]:
         if any(key_map.values()):
             return user_settings.default_provider, user_settings.default_model, key_map
 
-    try:
-        membership = user.membership
-        org_settings = OrganizationSettings.objects.get(organization=membership.organization)
-        key_map = {
-            "anthropic": org_settings.anthropic_api_key,
-            "openai": org_settings.openai_api_key,
-            "gemini": org_settings.gemini_api_key,
-        }
-        return org_settings.default_provider, org_settings.default_model, key_map
-    except (Membership.DoesNotExist, OrganizationSettings.DoesNotExist):
-        pass
+    if org_settings is not None:
+        return (
+            org_settings.default_provider,
+            org_settings.default_model,
+            {
+                "anthropic": org_settings.anthropic_api_key,
+                "openai": org_settings.openai_api_key,
+                "gemini": org_settings.gemini_api_key,
+            },
+        )
 
     if user_settings:
         return (
@@ -124,6 +128,15 @@ def resolve_api_config(user: Any) -> tuple[str, str, dict[str, str]]:
             },
         )
     return "anthropic", "", {"anthropic": "", "openai": "", "gemini": ""}
+
+
+def org_locks_api_keys(user: Any) -> bool:
+    """True if the user's org has locked all members to the org's API key + model."""
+    membership = getattr(user, "membership", None)
+    if membership is None:
+        return False
+    org_settings = OrganizationSettings.objects.filter(organization=membership.organization).first()
+    return bool(org_settings and org_settings.lock_member_api_keys)
 
 
 class FormTemplateViewSet(viewsets.ReadOnlyModelViewSet):
@@ -171,10 +184,18 @@ class UserSettingsView(APIView):
 
     def get(self, request: Any) -> Response:
         settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
-        return Response(UserSettingsSerializer(settings_obj).data)
+        data = UserSettingsSerializer(settings_obj).data
+        # Lets the UI disable personal-key editing when the org has locked keys.
+        data["org_locks_api_keys"] = org_locks_api_keys(request.user)
+        return Response(data)
 
     def put(self, request: Any) -> Response:
         self.check_permissions(request)
+        if org_locks_api_keys(request.user):
+            return Response(
+                {"detail": "Your organization has locked API keys to the organization configuration."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         settings_obj, _ = UserSettings.objects.get_or_create(user=request.user)
         serializer = UserSettingsSerializer(settings_obj, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -285,6 +306,7 @@ class RunAnalysisView(APIView):
 
         output_format = serializer.validated_data.get("output_format", "pdf")
         legal_description = serializer.validated_data.get("legal_description", "")
+        custom_modifier = serializer.validated_data.get("custom_modifier", "")
 
         # Operator-entered report-header values (prefilled + editable on the form).
         from .services.header import EDITABLE_HEADER_KEYS
@@ -317,6 +339,7 @@ class RunAnalysisView(APIView):
                 "model": model,
                 "output_format": output_format,
                 "legal_description": legal_description,
+                "has_custom_modifier": bool(custom_modifier),
             },
         )
 
@@ -331,6 +354,7 @@ class RunAnalysisView(APIView):
             model,
             str(request.user.id),
             legal_description,
+            custom_modifier,
             task_name=f"analysis-{analysis.id}",
             timeout=480,
             cluster=_cluster_for_user(request.user),

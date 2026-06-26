@@ -184,6 +184,7 @@ def run_pipeline(
     analysis_order: str = "chronological",
     title_agent_name: str = "",
     header_fields: dict[str, str] | None = None,
+    custom_modifier: str = "",
 ) -> PipelineResult:
     """Run Stage 1 + Stage 2 against a single Document, returning a PipelineResult.
 
@@ -259,12 +260,15 @@ def run_pipeline(
     # Stage 2b: AI resolves open questions and writes the narrative.
     # Clean chains skip the AI call — the deterministic narrative is accurate
     # for them and saves a model round-trip.
+    # A custom modifier is free-form operator guidance; it must reach the AI, so
+    # skip the clean-chain template shortcut whenever one is supplied.
+    has_modifier = bool(custom_modifier and custom_modifier.strip())
     merged_notes = list(parsed.get("notes", []))
-    if is_chain_clean(chain):
+    if is_chain_clean(chain) and not has_modifier:
         out["narrative"] = build_template_narrative(chain)
         resolved_questions = []
     else:
-        resolved = resolve_chain(chain, provider, api_key, model)
+        resolved = resolve_chain(chain, provider, api_key, model, user_guidance=custom_modifier or "")
         out["usage"]["input_tokens"] += resolved["usage"]["input_tokens"]
         out["usage"]["output_tokens"] += resolved["usage"]["output_tokens"]
         out["narrative"] = resolved["narrative"]

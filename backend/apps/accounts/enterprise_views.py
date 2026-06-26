@@ -1,4 +1,7 @@
+from datetime import datetime
+
 from django.db.models import Count, Sum
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -233,4 +236,115 @@ class EnterpriseApiUsageView(APIView):
                 "total_tokens": platform_input + platform_output,
             },
             "organizations": organizations,
+        })
+
+
+class EnterpriseUserUsageView(APIView):
+    """GET per-user usage for a given month.
+
+    Returns one row per user who ran at least one analysis in the month, with
+    analysis count + token totals, plus a per-day analysis count breakdown
+    (for the UI's expandable "per day" view). Pass ``?month=YYYY-MM`` to pick
+    the month; defaults to the current month.
+    """
+
+    permission_classes = [IsAuthenticated, IsEnterprise]
+
+    def _resolve_month(self, request):
+        raw = request.query_params.get("month", "").strip()
+        now = timezone.now()
+        if raw:
+            try:
+                parsed = datetime.strptime(raw, "%Y-%m")
+            except ValueError:
+                parsed = None
+            if parsed is not None:
+                month_start = now.replace(
+                    year=parsed.year, month=parsed.month, day=1,
+                    hour=0, minute=0, second=0, microsecond=0,
+                )
+                next_month = (month_start.replace(day=28) + timezone.timedelta(days=7)).replace(day=1)
+                return month_start, next_month
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        next_month = (month_start.replace(day=28) + timezone.timedelta(days=7)).replace(day=1)
+        return month_start, next_month
+
+    def get(self, request):
+        month_start, next_month = self._resolve_month(request)
+
+        base = COTAnalysis.objects.filter(
+            created_at__gte=month_start,
+            created_at__lt=next_month,
+            created_by__isnull=False,
+        )
+
+        totals = (
+            base.values(
+                "created_by__id",
+                "created_by__email",
+                "created_by__first_name",
+                "created_by__last_name",
+                "created_by__membership__organization__name",
+            )
+            .annotate(
+                analysis_count=Count("id"),
+                input_tokens=Sum("input_tokens"),
+                output_tokens=Sum("output_tokens"),
+            )
+            .order_by("-analysis_count")
+        )
+
+        # Per-user per-day analysis counts for the expandable breakdown.
+        daily_rows = (
+            base.annotate(day=TruncDate("created_at"))
+            .values("created_by__id", "day")
+            .annotate(count=Count("id"))
+            .order_by("day")
+        )
+        daily_by_user: dict[int, list[dict]] = {}
+        for row in daily_rows:
+            uid = row["created_by__id"]
+            day = row["day"]
+            daily_by_user.setdefault(uid, []).append({
+                "date": day.strftime("%Y-%m-%d") if day else "",
+                "count": row["count"],
+            })
+
+        users = []
+        platform_input = 0
+        platform_output = 0
+        platform_analyses = 0
+        for row in totals:
+            uid = row["created_by__id"]
+            input_t = row["input_tokens"] or 0
+            output_t = row["output_tokens"] or 0
+            count = row["analysis_count"] or 0
+            first = row["created_by__first_name"] or ""
+            last = row["created_by__last_name"] or ""
+            name = f"{first} {last}".strip()
+            users.append({
+                "user_id": uid,
+                "name": name or row["created_by__email"],
+                "email": row["created_by__email"],
+                "org_name": row["created_by__membership__organization__name"] or "—",
+                "analysis_count": count,
+                "input_tokens": input_t,
+                "output_tokens": output_t,
+                "total_tokens": input_t + output_t,
+                "daily": daily_by_user.get(uid, []),
+            })
+            platform_input += input_t
+            platform_output += output_t
+            platform_analyses += count
+
+        return Response({
+            "period": month_start.strftime("%Y-%m"),
+            "totals": {
+                "user_count": len(users),
+                "analysis_count": platform_analyses,
+                "input_tokens": platform_input,
+                "output_tokens": platform_output,
+                "total_tokens": platform_input + platform_output,
+            },
+            "users": users,
         })

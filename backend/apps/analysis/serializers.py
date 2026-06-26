@@ -108,6 +108,7 @@ class OrganizationSettingsSerializer(_APIKeySettingsSerializer):
             "id",
             "default_provider",
             "default_model",
+            "lock_member_api_keys",
             "anthropic_api_key",
             "openai_api_key",
             "gemini_api_key",
@@ -120,7 +121,18 @@ class OrganizationSettingsSerializer(_APIKeySettingsSerializer):
             "anthropic_api_key": {"write_only": True, "required": False},
             "openai_api_key": {"write_only": True, "required": False},
             "gemini_api_key": {"write_only": True, "required": False},
+            "lock_member_api_keys": {"required": False},
         }
+
+    def update(
+        self,
+        instance: OrganizationSettings,
+        validated_data: dict[str, Any],
+    ) -> OrganizationSettings:
+        if "lock_member_api_keys" in validated_data:
+            instance.lock_member_api_keys = validated_data.pop("lock_member_api_keys")
+        # super().update() persists the (now-set) lock flag alongside keys/model.
+        return super().update(instance, validated_data)
 
 
 class COTAnalysisSerializer(serializers.ModelSerializer):
@@ -245,6 +257,8 @@ class RunAnalysisSerializer(serializers.Serializer):
     address = serializers.CharField(required=False, allow_blank=True, default="")
     acres = serializers.CharField(required=False, allow_blank=True, default="")
     title_agent = serializers.CharField(required=False, allow_blank=True, default="")
+    # Optional free-form instruction injected into the Stage 2 narrative prompt.
+    custom_modifier = serializers.CharField(required=False, allow_blank=True, default="")
     provider = serializers.CharField(required=False, allow_blank=True, default="")
     model = serializers.CharField(required=False, allow_blank=True, default="")
 

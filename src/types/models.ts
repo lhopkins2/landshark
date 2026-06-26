@@ -85,6 +85,19 @@ export interface UserAnalysisSettings {
   openai_api_key_display: string;
   gemini_api_key_display: string;
   updated_at: string;
+  // True when the user's org has locked everyone to the org's key + model.
+  org_locks_api_keys?: boolean;
+}
+
+export interface OrganizationAnalysisSettings {
+  id: string;
+  default_provider: AIProvider;
+  default_model: string;
+  lock_member_api_keys: boolean;
+  anthropic_api_key_display: string;
+  openai_api_key_display: string;
+  gemini_api_key_display: string;
+  updated_at: string;
 }
 
 export type AnalysisStatus = "pending" | "processing" | "completed" | "failed" | "cancelled";

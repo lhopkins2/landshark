@@ -1,16 +1,21 @@
 import { useState } from "react";
-import { Sun, Moon, LogOut, Save, Check, RefreshCw, Info } from "lucide-react";
+import { Sun, Moon, LogOut, Save, Check, RefreshCw, Info, Lock, Building2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useThemeStore } from "../stores/themeStore";
 import { useAuthStore, selectHasApiKeyAccess } from "../stores/authStore";
-import { analysisSettingsApi, type AnalysisSettingsUpdate } from "../api/analysis";
+import {
+  analysisSettingsApi,
+  orgAnalysisSettingsApi,
+  type AnalysisSettingsUpdate,
+} from "../api/analysis";
 import { AI_PROVIDERS, AI_MODELS } from "../utils/constants";
-import type { AIProvider } from "../types/models";
+import type { AIProvider, OrganizationAnalysisSettings, UserAnalysisSettings } from "../types/models";
 
 export default function SettingsPage() {
   const { theme, toggleTheme } = useThemeStore();
   const { user, logout } = useAuthStore();
   const hasApiKeyAccess = useAuthStore(selectHasApiKeyAccess);
+  const isOrgAdmin = user?.role === "admin";
 
   return (
     <div>
@@ -53,8 +58,10 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {isOrgAdmin && <OrgAIConfigSection />}
+
       {hasApiKeyAccess ? (
-        <AIConfigSection />
+        <PersonalAIConfigSection />
       ) : (
         <div style={{
           padding: "var(--ls-space-lg)",
@@ -131,31 +138,154 @@ export default function SettingsPage() {
   );
 }
 
-function AIConfigSection() {
+/** Personal AI keys + model. Hidden behind the org lock when an admin has locked the org. */
+function PersonalAIConfigSection() {
   const queryClient = useQueryClient();
   const { data: settings } = useQuery({
     queryKey: ["analysis-settings"],
     queryFn: () => analysisSettingsApi.get().then((r) => r.data),
   });
 
+  const saveMutation = useMutation({
+    mutationFn: (data: AnalysisSettingsUpdate) => analysisSettingsApi.update(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["analysis-settings"] }),
+  });
+
+  const locked = settings?.org_locks_api_keys === true;
+
+  return (
+    <div style={cardStyle}>
+      <h3 style={sectionTitleStyle}>AI Configuration</h3>
+      {locked ? (
+        <div style={{
+          display: "flex", alignItems: "center", gap: "var(--ls-space-sm)",
+          padding: "var(--ls-space-md)", backgroundColor: "var(--ls-surface-2)",
+          borderRadius: "var(--ls-radius-md)", fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)",
+        }}>
+          <Lock size={16} />
+          Your organization requires everyone to use the organization's API key and model. Personal keys are
+          disabled while this is on.
+        </div>
+      ) : (
+        <AIConfigForm
+          settings={settings}
+          onSave={(data) => saveMutation.mutate(data)}
+          isPending={saveMutation.isPending}
+          isError={saveMutation.isError}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Org-wide AI keys + model + the personal-key lock. Admin only. */
+function OrgAIConfigSection() {
+  const queryClient = useQueryClient();
+  const { data: settings } = useQuery({
+    queryKey: ["org-analysis-settings"],
+    queryFn: () => orgAnalysisSettingsApi.get().then((r) => r.data),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (data: AnalysisSettingsUpdate) => orgAnalysisSettingsApi.update(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["org-analysis-settings"] }),
+  });
+
+  const lockMutation = useMutation({
+    mutationFn: (lock: boolean) => orgAnalysisSettingsApi.update({ lock_member_api_keys: lock }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["org-analysis-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["analysis-settings"] });
+    },
+  });
+
+  const locked = settings?.lock_member_api_keys === true;
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-xs)", marginBottom: "var(--ls-space-xs)" }}>
+        <Building2 size={16} style={{ color: "var(--ls-primary)" }} />
+        <h3 style={{ ...sectionTitleStyle, marginBottom: 0 }}>Organization AI Configuration</h3>
+      </div>
+      <p style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 0, marginBottom: "var(--ls-space-md)" }}>
+        Shared API key and model used by everyone in your organization who doesn't have their own.
+      </p>
+
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--ls-space-md)",
+        padding: "var(--ls-space-md)", backgroundColor: "var(--ls-surface-2)",
+        borderRadius: "var(--ls-radius-md)", marginBottom: "var(--ls-space-md)",
+      }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--ls-space-sm)" }}>
+          <Lock size={16} style={{ marginTop: 2, color: "var(--ls-text-secondary)", flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: "var(--ls-text-sm)", fontWeight: 600 }}>Lock members to the organization key</div>
+            <div style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginTop: 2, maxWidth: 460 }}>
+              When on, all members — including other admins — use this key and model. Personal keys and models
+              are ignored. When off, admins and permitted users may use their own.
+            </div>
+          </div>
+        </div>
+        <button
+          role="switch"
+          aria-checked={locked}
+          onClick={() => lockMutation.mutate(!locked)}
+          disabled={lockMutation.isPending}
+          title={locked ? "Unlock personal keys" : "Lock to organization key"}
+          style={{
+            position: "relative", width: 44, height: 24, borderRadius: 999, border: "none",
+            backgroundColor: locked ? "var(--ls-primary)" : "var(--ls-border)",
+            cursor: lockMutation.isPending ? "not-allowed" : "pointer", flexShrink: 0,
+            transition: "background-color var(--ls-transition-fast)", opacity: lockMutation.isPending ? 0.7 : 1,
+          }}
+        >
+          <span style={{
+            position: "absolute", top: 2, left: locked ? 22 : 2, width: 20, height: 20, borderRadius: "50%",
+            backgroundColor: "#fff", transition: "left var(--ls-transition-fast)",
+          }} />
+        </button>
+      </div>
+
+      <AIConfigForm
+        settings={settings}
+        onSave={(data) => saveMutation.mutate(data)}
+        isPending={saveMutation.isPending}
+        isError={saveMutation.isError}
+      />
+    </div>
+  );
+}
+
+const cardStyle: React.CSSProperties = {
+  padding: "var(--ls-space-lg)",
+  backgroundColor: "var(--ls-surface)",
+  border: "1px solid var(--ls-border)",
+  borderRadius: "var(--ls-radius-lg)",
+  marginBottom: "var(--ls-space-lg)",
+};
+
+const sectionTitleStyle: React.CSSProperties = {
+  fontWeight: 600,
+  marginBottom: "var(--ls-space-md)",
+  fontSize: "var(--ls-text-sm)",
+  color: "var(--ls-text-secondary)",
+};
+
+interface AIConfigFormProps {
+  settings: UserAnalysisSettings | OrganizationAnalysisSettings | undefined;
+  onSave: (data: AnalysisSettingsUpdate) => void;
+  isPending: boolean;
+  isError: boolean;
+}
+
+/** Shared provider + model + per-provider key inputs. Used by the personal and org sections. */
+function AIConfigForm({ settings, onSave, isPending, isError }: AIConfigFormProps) {
   const [provider, setProvider] = useState<AIProvider | "">("");
   const [model, setModel] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
   const [saved, setSaved] = useState(false);
-
-  const saveMutation = useMutation({
-    mutationFn: (data: AnalysisSettingsUpdate) => analysisSettingsApi.update(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["analysis-settings"] });
-      setAnthropicKey("");
-      setOpenaiKey("");
-      setGeminiKey("");
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    },
-  });
 
   const activeProvider = provider || settings?.default_provider || "anthropic";
 
@@ -184,7 +314,12 @@ function AIConfigSection() {
     if (anthropicKey) data.anthropic_api_key = anthropicKey;
     if (openaiKey) data.openai_api_key = openaiKey;
     if (geminiKey) data.gemini_api_key = geminiKey;
-    saveMutation.mutate(data);
+    onSave(data);
+    setAnthropicKey("");
+    setOpenaiKey("");
+    setGeminiKey("");
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   };
 
   const inputStyle = {
@@ -199,18 +334,7 @@ function AIConfigSection() {
   };
 
   return (
-    <div style={{
-      padding: "var(--ls-space-lg)",
-      backgroundColor: "var(--ls-surface)",
-      border: "1px solid var(--ls-border)",
-      borderRadius: "var(--ls-radius-lg)",
-      marginBottom: "var(--ls-space-lg)",
-    }}>
-      <h3 style={{ fontWeight: 600, marginBottom: "var(--ls-space-md)", fontSize: "var(--ls-text-sm)", color: "var(--ls-text-secondary)" }}>
-        AI Configuration
-      </h3>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--ls-space-md)" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--ls-space-md)" }}>
         <div>
           <label style={{ display: "block", fontSize: "var(--ls-text-xs)", color: "var(--ls-text-muted)", marginBottom: 4 }}>
             Default Provider
@@ -340,27 +464,26 @@ function AIConfigSection() {
         <div style={{ display: "flex", alignItems: "center", gap: "var(--ls-space-sm)" }}>
           <button
             onClick={handleSave}
-            disabled={saveMutation.isPending}
+            disabled={isPending}
             style={{
               display: "flex", alignItems: "center", gap: "var(--ls-space-xs)",
               padding: "8px 16px", borderRadius: "var(--ls-radius-md)",
               border: "none", backgroundColor: "var(--ls-primary)",
               color: "#fff", fontSize: "var(--ls-text-sm)", fontWeight: 600,
-              cursor: saveMutation.isPending ? "not-allowed" : "pointer",
-              opacity: saveMutation.isPending ? 0.7 : 1,
+              cursor: isPending ? "not-allowed" : "pointer",
+              opacity: isPending ? 0.7 : 1,
             }}
           >
             {saved ? <Check size={16} /> : <Save size={16} />}
-            {saveMutation.isPending ? "Saving..." : saved ? "Saved" : "Save"}
+            {isPending ? "Saving..." : saved ? "Saved" : "Save"}
           </button>
-          {saveMutation.isError && (
+          {isError && (
             <span style={{ fontSize: "var(--ls-text-xs)", color: "var(--ls-error)" }}>
               Failed to save settings
             </span>
           )}
         </div>
       </div>
-    </div>
   );
 }
 

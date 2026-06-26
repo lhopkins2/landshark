@@ -165,6 +165,7 @@ def run_analysis_task(
     model: str,
     user_id: str,
     legal_description: str = "",
+    custom_modifier: str = "",
 ) -> None:
     """Run the full analysis pipeline. Called by Django-Q2 async_task."""
     user_model = get_user_model()
@@ -195,6 +196,7 @@ def run_analysis_task(
             output_format=output_format,
             legal_description=legal_description,
             analysis_order=analysis_order,
+            custom_modifier=custom_modifier,
         )
 
     except _AnalysisCancelledError:
@@ -225,6 +227,7 @@ def _run_new_pipeline(
     output_format: str,
     legal_description: str,
     analysis_order: str,
+    custom_modifier: str = "",
 ) -> None:
     """Run the two-stage structured pipeline and persist its output.
 
@@ -245,6 +248,7 @@ def _run_new_pipeline(
         analysis_order=analysis_order,
         title_agent_name=_resolve_title_agent_name(user),
         header_fields=analysis.header_fields or {},
+        custom_modifier=custom_modifier,
     )
 
     # result_text holds a markdown document (table + narrative + notes) for the PDF/DOCX generator.

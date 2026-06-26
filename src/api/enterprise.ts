@@ -63,6 +63,35 @@ interface ApiUsageResponse {
   organizations: OrgTokenUsage[];
 }
 
+export interface UserDailyUsage {
+  date: string;
+  count: number;
+}
+
+export interface UserUsageRow {
+  user_id: number;
+  name: string;
+  email: string;
+  org_name: string;
+  analysis_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  daily: UserDailyUsage[];
+}
+
+interface UserUsageResponse {
+  period: string;
+  totals: {
+    user_count: number;
+    analysis_count: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+  users: UserUsageRow[];
+}
+
 export const enterpriseApi = {
   stats: () => apiClient.get<EnterpriseStats>("/enterprise/stats/"),
 
@@ -116,4 +145,10 @@ export const enterpriseApi = {
     }),
 
   apiUsage: () => apiClient.get<ApiUsageResponse>("/enterprise/api-usage/"),
+
+  // Per-user usage for the Usage tab. `month` is "YYYY-MM"; omit for current month.
+  userUsage: (month?: string) =>
+    apiClient.get<UserUsageResponse>("/enterprise/user-usage/", {
+      params: month ? { month } : undefined,
+    }),
 };

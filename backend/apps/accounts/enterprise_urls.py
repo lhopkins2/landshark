@@ -18,4 +18,5 @@ urlpatterns = [
         name="enterprise-template-detail",
     ),
     path("api-usage/", enterprise_views.EnterpriseApiUsageView.as_view(), name="enterprise-api-usage"),
+    path("user-usage/", enterprise_views.EnterpriseUserUsageView.as_view(), name="enterprise-user-usage"),
 ]
